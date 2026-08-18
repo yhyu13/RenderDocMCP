@@ -146,6 +146,10 @@ get_buffer_contents(resource_id="ResourceId::123", offset=256, length=512)
 
 > **Note**: 動作確認はWindows + DirectX 11環境でのみ行っています。
 > Linux/macOS + Vulkan/OpenGL環境でも動作する可能性がありますが、未検証です。
+>
+> **Note**: WebGPU (D3D12 バックエンド) のキャプチャも D3D12 キャプチャとして扱えます。
+> 検査ツール (`get_shader_info` / `get_buffer_contents` / `get_texture_data`) はそのまま
+> 利用可能です。Dawn が WGSL → HLSL にローワリングするため、シェーダーソースは HLSL で返ります。
 
 ## ライセンス
 
