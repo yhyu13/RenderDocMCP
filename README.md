@@ -2,6 +2,10 @@
 
 作为 RenderDoc UI 扩展运行的 MCP 服务器。AI 助手可以访问 RenderDoc 的捕获数据，辅助 DirectX 11/12 的图形调试。
 
+> **兼容性说明**: 除 D3D11/D3D12 外，WebGPU（D3D12 后端）的捕获也可作为 D3D12 捕获进行检查。
+> 检查工具（`get_shader_info` / `get_buffer_contents` / `get_texture_data`）可直接使用；
+> 着色器源码是 Dawn 将 WGSL→HLSL 降级后的 HLSL。
+
 ## 架构
 
 混合进程分离方式：

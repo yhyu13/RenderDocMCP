@@ -36,3 +36,28 @@
 - **Tests**: 74/74 pass (`python -m unittest discover -s tests`), `py_compile` clean.
 - **Deferred (P3)**: `check_binding_completeness` docstring drift; `score_from_report` no-signal sentinel *semantics*; `rule_setpass_rt` missing-data shape; `ShaderCompileFlags` default (`rd.ShaderCompileFlags()` vs int) unverified against a real binding.
 - **Future work**: run the full loop against a real RenderDoc/GPU to validate `BuildTargetShader` / `ReplaceResource` / `SetFrameEvent`; golden-baseline management (doc3 open question); `get_debug_messages` queue-draining semantics.
+
+---
+
+## WebGPU capture support (2026-08-18)
+
+> A second workstream: the skill (`renderdoc-skill`) covered post-capture *inspection*, but the
+> **capture side** of `renderdoc-webgpu.md` (§1/§1a) and the `12_ddgi` recipe (§2) were missing
+> from both repos, along with any WebGPU/Dawn knowledge.
+
+| Me | You |
+|---|---|
+| Reviewed `renderdoc-webgpu.md` against both repos and ruled: both cover only the inspect half; Chrome D3D12 process-injection capture, Dawn flags, and the `12_ddgi` recipe are all missing. Handed over an update plan. | Executed: `renderdoc-skill` gained `references/webgpu-capture.md` (port of §1/§1a/caveats, Windows-only) and `capture_webgpu.py` (launch Chrome → parse GPU-dialog PID → `rd.InjectIntoProcess` → collect `.rdc`); `debugging-recipes.md` gained Recipe 7 (`12_ddgi`); `SKILL.md` gained WebGPU/WebGL/Chrome/Dawn/three.js trigger words + a §2 "WebGPU / WebGL (browser)" subsection. `RenderDocMCP` got a one-line WebGPU(D3D12) compatibility note — no capture added (the extension runs in RenderDoc's Python 3.6 sandbox and can't drive Chrome). |
+| — | Verified: `capture_webgpu.py` `py_compile` clean; `RenderDocMCP` 63 tests green. Left `rdc doctor` + a real `capture_webgpu.py` run for a host with Chrome Canary v144+ + RenderDoc. |
+| "git add files and push to remote" | Committed + pushed both repos (`renderdoc-skill` master `10c48db`; `RenderDocMCP` main `cd04063`). |
+| "更新readme成中文，更新我们所做，更新journey然后push to remote" | Translated `renderdoc-skill/README.md` to Chinese (WebGPU section + 7 recipes + file structure); restored the Chinese WebGPU note in `RenderDocMCP/README.md`; appended this section to both JOURNEYs; pushed. |
+
+### Deliverables
+
+- `renderdoc-skill`: `references/webgpu-capture.md` (new), `capture_webgpu.py` (new), `debugging-recipes.md` Recipe 7, `SKILL.md` trigger/scope/§2 updates.
+- `RenderDocMCP`: README WebGPU(D3D12) compatibility note (docs only).
+
+### Status
+
+- Pushed both repos (see commits above).
+- Pending manual verification: `rdc doctor` + `capture_webgpu.py` against `12_ddgi`, confirming the `.rdc` exposes named `ddgi_probeData` / `ddgi_rayDir` resources (needs Chrome Canary v144+ + RenderDoc).
