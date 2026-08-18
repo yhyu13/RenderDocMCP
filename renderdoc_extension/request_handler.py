@@ -28,6 +28,12 @@ class RequestHandler:
             "get_pipeline_state": self._handle_get_pipeline_state,
             "list_captures": self._handle_list_captures,
             "open_capture": self._handle_open_capture,
+            "get_shader_source": self._handle_get_shader_source,
+            "compile_shader": self._handle_compile_shader,
+            "replace_shader": self._handle_replace_shader,
+            "remove_shader_replacement": self._handle_remove_shader_replacement,
+            "replay_event": self._handle_replay_event,
+            "get_debug_messages": self._handle_get_debug_messages,
         }
 
     def handle(self, request):
@@ -183,3 +189,62 @@ class RequestHandler:
         if capture_path is None:
             raise ValueError("capture_path is required")
         return self.facade.open_capture(capture_path)
+
+    def _handle_get_shader_source(self, params):
+        """Handle get_shader_source request"""
+        event_id = params.get("event_id")
+        stage = params.get("stage")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        if stage is None:
+            raise ValueError("stage is required")
+        return self.facade.get_shader_source(int(event_id), stage)
+
+    def _handle_compile_shader(self, params):
+        """Handle compile_shader request"""
+        hlsl = params.get("hlsl")
+        stage = params.get("stage")
+        entry = params.get("entry")
+        if hlsl is None:
+            raise ValueError("hlsl is required")
+        if stage is None:
+            raise ValueError("stage is required")
+        if entry is None:
+            raise ValueError("entry is required")
+        encoding = params.get("encoding", "hlsl")
+        compile_flags = params.get("compile_flags")
+        return self.facade.compile_shader(hlsl, stage, entry, encoding, compile_flags)
+
+    def _handle_replace_shader(self, params):
+        """Handle replace_shader request"""
+        event_id = params.get("event_id")
+        stage = params.get("stage")
+        compiled_resource_id = params.get("compiled_resource_id")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        if stage is None:
+            raise ValueError("stage is required")
+        if compiled_resource_id is None:
+            raise ValueError("compiled_resource_id is required")
+        return self.facade.replace_shader(int(event_id), stage, compiled_resource_id)
+
+    def _handle_remove_shader_replacement(self, params):
+        """Handle remove_shader_replacement request"""
+        event_id = params.get("event_id")
+        stage = params.get("stage")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        if stage is None:
+            raise ValueError("stage is required")
+        return self.facade.remove_shader_replacement(int(event_id), stage)
+
+    def _handle_replay_event(self, params):
+        """Handle replay_event request"""
+        event_id = params.get("event_id")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        return self.facade.replay_event(int(event_id))
+
+    def _handle_get_debug_messages(self, params):
+        """Handle get_debug_messages request"""
+        return self.facade.get_debug_messages()

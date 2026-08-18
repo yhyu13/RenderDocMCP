@@ -7,6 +7,7 @@ from .action_service import ActionService
 from .search_service import SearchService
 from .resource_service import ResourceService
 from .pipeline_service import PipelineService
+from .shader_edit_service import ShaderEditService
 
 __all__ = [
     "CaptureManager",
@@ -14,4 +15,5 @@ __all__ = [
     "SearchService",
     "ResourceService",
     "PipelineService",
+    "ShaderEditService",
 ]

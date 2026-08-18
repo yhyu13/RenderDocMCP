@@ -46,7 +46,7 @@ class FakeBackend:
     def compile_shader(self, hlsl, stage):
         if self.fail_compile or hlsl == "BAD_SOURCE":
             raise ShaderCompileError("compile failed")
-        return b"bytecode:" + hlsl.encode()
+        return "shader:" + hlsl
 
     def inject_shader(self, event_id, stage, bytecode):
         self.injected.append((event_id, stage))

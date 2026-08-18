@@ -311,6 +311,112 @@ def open_capture(capture_path: str) -> dict:
     return bridge.call("open_capture", {"capture_path": capture_path})
 
 
+@mcp.tool
+def get_shader_source(
+    event_id: int,
+    stage: Literal["vertex", "hull", "domain", "geometry", "pixel", "compute"],
+) -> dict:
+    """
+    Get the raw shader bytes of the shader bound at an event/stage.
+
+    Args:
+        event_id: The event ID to inspect
+        stage: The shader stage
+
+    Returns the shader resource id, entry point, encoding, and (when available)
+    the raw shader bytes as base64. `is_source_text` is True only when the
+    encoding is directly editable (HLSL/GLSL/SPIRVAsm); binary encodings
+    (DXBC/DXIL/SPIRV) are not editable source.
+    """
+    return bridge.call("get_shader_source", {"event_id": event_id, "stage": stage})
+
+
+@mcp.tool
+def compile_shader(
+    hlsl: str,
+    stage: Literal["vertex", "hull", "domain", "geometry", "pixel", "compute"],
+    entry: str,
+    encoding: Literal["hlsl", "glsl", "spirv", "dxbc", "dxil"] = "hlsl",
+) -> dict:
+    """
+    Compile shader source into a replacement shader for the capture's API.
+
+    Args:
+        hlsl: The shader source (HLSL/GLSL/etc. depending on encoding)
+        stage: The shader stage this source is for
+        entry: The entry point function name (e.g. "main", "PSMain")
+        encoding: The source encoding (default "hlsl")
+
+    Returns the compiled shader's resource id and any compiler messages.
+    Raises an error if compilation fails.
+    """
+    return bridge.call(
+        "compile_shader",
+        {"hlsl": hlsl, "stage": stage, "entry": entry, "encoding": encoding},
+    )
+
+
+@mcp.tool
+def replace_shader(
+    event_id: int,
+    stage: Literal["vertex", "hull", "domain", "geometry", "pixel", "compute"],
+    compiled_resource_id: str,
+) -> dict:
+    """
+    Replace the shader bound at an event/stage with a previously compiled shader.
+
+    Args:
+        event_id: The event ID where the shader is bound
+        stage: The shader stage to replace
+        compiled_resource_id: The resource id returned by compile_shader
+
+    Returns the original and replacement resource ids.
+    """
+    return bridge.call(
+        "replace_shader",
+        {"event_id": event_id, "stage": stage, "compiled_resource_id": compiled_resource_id},
+    )
+
+
+@mcp.tool
+def remove_shader_replacement(
+    event_id: int,
+    stage: Literal["vertex", "hull", "domain", "geometry", "pixel", "compute"],
+) -> dict:
+    """
+    Remove any shader replacement at an event/stage, restoring the original.
+
+    Args:
+        event_id: The event ID where the replacement was applied
+        stage: The shader stage to restore
+    """
+    return bridge.call(
+        "remove_shader_replacement", {"event_id": event_id, "stage": stage}
+    )
+
+
+@mcp.tool
+def replay_event(event_id: int) -> dict:
+    """
+    Replay the capture up to the given event, applying any shader replacements.
+
+    Args:
+        event_id: The event ID to replay up to
+    """
+    return bridge.call("replay_event", {"event_id": event_id})
+
+
+@mcp.tool
+def get_debug_messages() -> dict:
+    """
+    Retrieve newly generated diagnostic/validation messages from the last replay.
+
+    These are the L1 deterministic validation-layer messages (RenderDoc's
+    GetDebugMessages). Each call drains the queue of new messages.
+    """
+    return bridge.call("get_debug_messages")
+
+
 def main():
     """Run the MCP server"""
     mcp.run()

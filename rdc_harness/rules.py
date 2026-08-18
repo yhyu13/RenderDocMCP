@@ -315,6 +315,30 @@ def check_min_lod(pass_summary: Mapping[str, Any]) -> Optional[CheckResult]:
                    expected="minLod <= mip count", actual="ok")
 
 
+def check_validation_messages(
+    messages: Optional[Iterable[Mapping[str, Any]]] = None,
+) -> Optional[CheckResult]:
+    """Validation-layer messages must be empty of error/high severity (doc3 §3.1)."""
+    if not messages:
+        return None
+    errors = [
+        m for m in messages
+        if isinstance(m, Mapping)
+        and str(m.get("severity", "")).lower() in ("error", "high")
+    ]
+    if errors:
+        return _result(
+            "validation_messages", Severity.HIGH, False,
+            "%d validation error(s) in last replay" % len(errors),
+            expected="0 errors", actual=len(errors),
+            evidence={"messages": errors[:10]},
+        )
+    return _result(
+        "validation_messages", Severity.HIGH, True,
+        "no validation errors", expected="0 errors", actual=0,
+    )
+
+
 def check_binding_completeness(pipeline: Mapping[str, Any]) -> Optional[CheckResult]:
     """Resource binding completeness (doc3 §3.1): bound shader must have its inputs bound."""
     shaders = _get(pipeline, "shaders")
@@ -384,13 +408,15 @@ def run_deterministic(
     passes: Optional[Iterable[Mapping[str, Any]]] = None,
     pipeline: Optional[Mapping[str, Any]] = None,
     thresholds: Optional[Thresholds] = None,
+    debug_messages: Optional[Iterable[Mapping[str, Any]]] = None,
 ) -> VerificationReport:
     """Run the full L1 deterministic verification layer.
 
     Frame-level rules whose required data is absent are emitted as SKIP, so
     the report degrades to "nothing verified" (``all_pass()`` is False)
     instead of a false pass. Auxiliary anomaly rules (textures, setpass/RT,
-    minLod, binding) are omitted when their inputs are not supplied.
+    minLod, binding, validation messages) are omitted when their inputs are
+    not supplied.
     """
     t = thresholds or Thresholds()
     checks: list[CheckResult] = []
@@ -411,5 +437,9 @@ def run_deterministic(
         result = check_binding_completeness(pipeline)
         if result is not None:
             checks.append(result)
+
+    result = check_validation_messages(debug_messages)
+    if result is not None:
+        checks.append(result)
 
     return VerificationReport(layer="L1", checks=checks)

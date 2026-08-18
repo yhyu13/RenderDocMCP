@@ -22,16 +22,21 @@ class ShaderCompileError(Exception):
 class ShaderBackend(Protocol):
     """RenderDoc-side operations needed by the loop (doc3 §4.3)."""
 
-    def compile_shader(self, hlsl: str, stage: str) -> bytes:
-        """Compile HLSL/GLSL to bytecode; raise ShaderCompileError on failure."""
+    def compile_shader(self, hlsl: str, stage: str) -> str:
+        """Compile HLSL/GLSL source; return an opaque compiled-shader handle.
+
+        Raises ShaderCompileError on failure. The handle is consumed verbatim
+        by :meth:`inject_shader` (for RenderDoc it is a replacement shader
+        resource id string).
+        """
         ...
 
-    def inject_shader(self, event_id: int, stage: str, bytecode: bytes) -> None:
-        """Replace the shader at event_id/stage (RenderDoc SetShaderBytes)."""
+    def inject_shader(self, event_id: int, stage: str, compiled: str) -> None:
+        """Replace the shader bound at event_id/stage with ``compiled``."""
         ...
 
     def replay(self, event_id: int) -> None:
-        """Replay the capture up to event_id (RenderDoc ReplayEvent)."""
+        """Replay the capture up to event_id, applying replacements."""
         ...
 
     def run_l1(self) -> VerificationReport:
@@ -86,7 +91,7 @@ def iterate_shader_fix(
     for round_i in range(max_round):
         # Static check: compile before touching the capture.
         try:
-            new_bytes = backend.compile_shader(current, stage)
+            compiled = backend.compile_shader(current, stage)
         except ShaderCompileError as e:
             return {
                 "status": "static_fail",
@@ -96,7 +101,7 @@ def iterate_shader_fix(
                 "history": history,
             }
 
-        backend.inject_shader(event_id, stage, new_bytes)
+        backend.inject_shader(event_id, stage, compiled)
         backend.replay(event_id)
 
         # L1 deterministic first — zero cost, blocks non-shader bugs.

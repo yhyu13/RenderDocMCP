@@ -10,6 +10,7 @@ from .services import (
     SearchService,
     ResourceService,
     PipelineService,
+    ShaderEditService,
 )
 
 
@@ -40,6 +41,7 @@ class RenderDocFacade:
         self._search = SearchService(ctx, self._invoke)
         self._resource = ResourceService(ctx, self._invoke)
         self._pipeline = PipelineService(ctx, self._invoke)
+        self._shader_edit = ShaderEditService(ctx, self._invoke)
 
     def _invoke(self, callback):
         """Invoke callback on replay thread via BlockInvoke"""
@@ -135,3 +137,29 @@ class RenderDocFacade:
     def get_pipeline_state(self, event_id):
         """Get full pipeline state at an event"""
         return self._pipeline.get_pipeline_state(event_id)
+
+    # ==================== Shader Edit / Replay Operations ====================
+
+    def get_shader_source(self, event_id, stage):
+        """Get the raw shader bytes (and encoding) at event/stage"""
+        return self._shader_edit.get_shader_source(event_id, stage)
+
+    def compile_shader(self, hlsl, stage, entry, encoding="hlsl", compile_flags=None):
+        """Compile HLSL/GLSL source into a replacement shader"""
+        return self._shader_edit.compile_shader(hlsl, stage, entry, encoding, compile_flags)
+
+    def replace_shader(self, event_id, stage, compiled_resource_id):
+        """Replace the shader bound at event/stage with a compiled shader"""
+        return self._shader_edit.replace_shader(event_id, stage, compiled_resource_id)
+
+    def remove_shader_replacement(self, event_id, stage):
+        """Remove any shader replacement at event/stage"""
+        return self._shader_edit.remove_shader_replacement(event_id, stage)
+
+    def replay_event(self, event_id):
+        """Replay the capture up to event_id"""
+        return self._shader_edit.replay_event(event_id)
+
+    def get_debug_messages(self):
+        """Retrieve newly generated diagnostic/validation messages"""
+        return self._shader_edit.get_debug_messages()
