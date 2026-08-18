@@ -1,156 +1,178 @@
 # RenderDoc MCP Server
 
-RenderDoc UI拡張機能として動作するMCPサーバー。AIアシスタントがRenderDocのキャプチャデータにアクセスし、グラフィックスデバッグを支援する。
+作为 RenderDoc UI 扩展运行的 MCP 服务器。AI 助手可以访问 RenderDoc 的捕获数据，辅助 DirectX 11/12 的图形调试。
 
-## アーキテクチャ
+## 架构
+
+混合进程分离方式：
 
 ```
 Claude/AI Client (stdio)
         │
         ▼
-MCP Server Process (Python + FastMCP 2.0)
-        │ File-based IPC (%TEMP%/renderdoc_mcp/)
+MCP Server Process (标准 Python + FastMCP 2.0)
+        │ 文件 IPC (%TEMP%/renderdoc_mcp/)
         ▼
-RenderDoc Process (Extension)
+RenderDoc Process (扩展 + 文件轮询)
 ```
 
-RenderDoc内蔵のPythonにはsocketモジュールがないため、ファイルベースのIPCで通信を行う。
+## 项目结构
 
-## セットアップ
+```
+RenderDocMCP/
+├── mcp_server/                        # MCP 服务器
+│   ├── server.py                      # FastMCP 入口
+│   ├── config.py                      # 配置
+│   └── bridge/
+│       └── client.py                  # 文件 IPC 客户端
+│
+├── rdc_harness/                       # 验证 + shader 修复编排核心（纯 Python，无 GPU）
+│   ├── models.py                      # 结构化数据模型（CheckResult / VerificationReport 等）
+│   ├── rules.py                       # L1 确定性验证 + 自动红线规则引擎
+│   ├── behavioral.py                  # L2 行为验证（像素 diff / PSNR / RT 哈希）
+│   ├── summarize.py                   # Layer1/Layer2 摘要 + token 压缩
+│   ├── orchestrator.py                # shader 编辑 → 重放 → 验证循环
+│   ├── renderdoc_backend.py           # 通过 MCP bridge 驱动扩展的适配器
+│   ├── report.py                      # before/after 修复报告
+│   └── __main__.py                    # CLI（`python -m rdc_harness frame.json`）
+│
+├── renderdoc_extension/               # RenderDoc 扩展
+│   ├── __init__.py                    # register()/unregister()
+│   ├── extension.json                 # 清单
+│   ├── socket_server.py               # 文件 IPC 服务器
+│   ├── request_handler.py             # 请求处理
+│   ├── renderdoc_facade.py            # RenderDoc API 封装
+│   └── services/                      # 各领域服务（含 shader_edit_service.py）
+│
+└── scripts/
+    └── install_extension.py           # 扩展安装
+```
 
-### 1. RenderDoc拡張機能のインストール
+## MCP 工具
+
+### 数据访问工具
+
+| 工具名 | 说明 |
+|---------|------|
+| `list_captures` | 获取指定目录内的 .rdc 文件列表 |
+| `open_capture` | 打开捕获文件（已有捕获会自动关闭） |
+| `get_capture_status` | 确认捕获读取状态 |
+| `get_draw_calls` | 绘制调用列表（层级结构、支持过滤） |
+| `get_frame_summary` | 帧整体统计（绘制调用数、标记列表等） |
+| `find_draws_by_shader` | 按 shader 名称反查绘制调用 |
+| `find_draws_by_texture` | 按纹理名称反查绘制调用 |
+| `find_draws_by_resource` | 按资源 ID 反查绘制调用 |
+| `get_draw_call_details` | 特定绘制调用的详情 |
+| `get_action_timings` | 获取 action 的 GPU 执行时间 |
+| `get_shader_info` | shader 反汇编 / 常量缓冲区 |
+| `get_buffer_contents` | 获取缓冲区数据（可指定 offset/长度） |
+| `get_texture_info` | 纹理元数据 |
+| `get_texture_data` | 纹理像素数据（支持 mip/slice/3D 切片） |
+| `get_pipeline_state` | 完整管线状态 |
+
+### Shader 编辑 / 重放工具（rdc 内闭环）
+
+| 工具名 | 说明 |
+|---------|------|
+| `get_shader_source` | 获取 shader 的原始字节与编码（`is_source_text` 标记是否可编辑） |
+| `compile_shader` | 编译 HLSL/GLSL 源为捕获 API 可用的替换 shader |
+| `replace_shader` | 用编译后的 shader 替换指定 event/stage 的 shader |
+| `remove_shader_replacement` | 撤销替换，恢复原 shader |
+| `replay_event` | 重放捕获到指定 event（应用所有替换） |
+| `get_debug_messages` | 获取验证层诊断消息（L1 确定性验证） |
+
+### get_draw_calls 过滤选项
+
+```python
+get_draw_calls(
+    include_children=True,      # 包含子 action
+    marker_filter="Camera.Render",  # 仅取该标记之下
+    exclude_markers=["GUI.Repaint", "UIR.DrawChain"],  # 排除的标记
+    event_id_min=7372,          # event_id 范围起点
+    event_id_max=7600,          # event_id 范围终点
+    only_actions=True,          # 排除标记（仅绘制调用）
+    flags_filter=["Drawcall", "Dispatch"],  # 仅保留指定 flag
+)
+```
+
+### 捕获管理工具
+
+```python
+list_captures(directory="D:\\captures")
+# → {"count": 3, "captures": [{"filename": "game.rdc", "path": "...", "size_bytes": 12345, "modified_time": "..."}, ...]}
+
+open_capture(capture_path="D:\\captures\\game.rdc")
+# → {"success": true, "filename": "game.rdc", "api": "D3D11"}
+```
+
+### 反查搜索工具
+
+```python
+find_draws_by_shader(shader_name="Toon", stage="pixel")
+find_draws_by_texture(texture_name="CharacterSkin")
+find_draws_by_resource(resource_id="ResourceId::12345")
+```
+
+### GPU 计时获取
+
+```python
+get_action_timings()
+get_action_timings(event_ids=[100, 200, 300])
+get_action_timings(marker_filter="Camera.Render", exclude_markers=["GUI.Repaint"])
+```
+
+**注意**：GPU 计时计数器在部分硬件/驱动上不可用。若返回 `available: false`，则该捕获无法获取计时信息。
+
+## Shader 编辑 + 重放闭环
+
+`rdc_harness` 实现了 `.rdc` 内部的「改 → 编译 → 重放 → 验证」闭环（对应感知 Agent 设计文档的 L1/L2 双层验证）：
+
+```
+编译 → 静态检查 → 替换 shader → 重放 → L1 确定性验证
+  → (失败 ⇒ needs_rebuild) → L2 行为验证 → (分数 ≤ 阈值 ⇒ ok) → 修补 → 重复
+```
+
+- **L1 确定性验证**（`rules.py`）：零模型成本，纯规则 —— 帧预算、瓶颈、draw call 数量、pass 耗时、overdraw、带宽、合批、纹理、SetPass/RT 切换、资源绑定完整性、验证层消息（`get_debug_messages`）。
+- **L2 行为验证**（`behavioral.py`）：像素 diff、PSNR、渲染目标哈希，与 golden 图对比。
+- **编排器**（`orchestrator.iterate_shader_fix`）：`compile → inject → replay → L1 → L2 → patch → repeat` 循环，通过 `ShaderBackend`/`ShaderPatcher` 协议与 RenderDoc 解耦，可无 GPU 单元测试。
+- **报告**（`report.py`）：输出 before/after 对比报告，供人工/CI 决策。
+
+`RenderDocShaderBackend`（`rdc_harness/renderdoc_backend.py`）通过 MCP bridge 调用上述 shader 编辑工具，实现真正的 RenderDoc 侧 I/O：
+
+| 后端方法 | 映射的 RenderDoc API / MCP 工具 |
+|---|---|
+| `compile_shader` | `BuildTargetShader(entry, enc, source, flags, stage)` |
+| `inject_shader` | `ReplaceResource(original, compiled)` |
+| `replay` | `SetFrameEvent(eventId, force=True)` |
+| `run_l1` | `get_frame_summary` + `get_pipeline_state` + `get_debug_messages` |
+| `run_l2` | `get_texture_data` vs golden 字节 |
+
+## 通信协议
+
+文件 IPC：
+
+- IPC 目录：`%TEMP%/renderdoc_mcp/`
+- `request.json`：请求（MCP 服务器 → RenderDoc）
+- `response.json`：响应（RenderDoc → MCP 服务器）
+- `lock`：写入中锁文件
+- 轮询间隔：100ms（RenderDoc 侧）
+
+## 开发笔记
+
+- RenderDoc 内置 Python 无 socket/QtNetwork 模块，故采用文件 IPC
+- RenderDoc 扩展仅使用 Python 3.6 标准库
+- ReplayController 访问通过 `BlockInvoke` 完成
+- `rdc_harness` 运行于 AI/MCP 侧（Python ≥ 3.10），**不可**在 `renderdoc_extension/` 内导入（其内置 Python 3.6 无法解析现代注解）
+
+## 测试
 
 ```bash
-python scripts/install_extension.py
+# stdlib unittest，无需 pytest
+python -m unittest discover -s tests
 ```
 
-拡張機能は `%APPDATA%\qrenderdoc\extensions\renderdoc_mcp_bridge` にインストールされる。
+## 参考链接
 
-### 2. RenderDocで拡張機能を有効化
-
-1. RenderDocを起動
-2. Tools > Manage Extensions
-3. "RenderDoc MCP Bridge" を有効化
-
-### 3. MCPサーバーのインストール
-
-```bash
-uv tool install
-uv tool update-shell  # PATHに追加
-```
-
-シェルを再起動すると `renderdoc-mcp` コマンドが使えるようになる。
-
-> **Note**: `--editable` を付けると、ソースコードの変更が即座に反映される（開発時に便利）。
-> 安定版としてインストールする場合は `uv tool install .` を使用。
-
-### 4. MCPクライアントの設定
-
-#### Claude Desktop
-
-`claude_desktop_config.json` に追加:
-
-```json
-{
-  "mcpServers": {
-    "renderdoc": {
-      "command": "renderdoc-mcp"
-    }
-  }
-}
-```
-
-#### Claude Code
-
-`.mcp.json` に追加:
-
-```json
-{
-  "mcpServers": {
-    "renderdoc": {
-      "command": "renderdoc-mcp"
-    }
-  }
-}
-```
-
-## 使い方
-
-1. RenderDocを起動し、キャプチャファイル (.rdc) を開く
-2. MCPクライアント (Claude等) から RenderDoc のデータにアクセス
-
-## MCPツール一覧
-
-| ツール | 説明 |
-|--------|------|
-| `get_capture_status` | キャプチャの読み込み状態を確認 |
-| `get_draw_calls` | ドローコール一覧を階層構造で取得 |
-| `get_draw_call_details` | 特定のドローコールの詳細情報を取得 |
-| `get_shader_info` | シェーダーのソースコード・定数バッファの値を取得 |
-| `get_buffer_contents` | バッファの内容を取得 (Base64) |
-| `get_texture_info` | テクスチャのメタデータを取得 |
-| `get_texture_data` | テクスチャのピクセルデータを取得 (Base64) |
-| `get_pipeline_state` | パイプライン状態を取得 |
-
-## 使用例
-
-### ドローコール一覧の取得
-
-```
-get_draw_calls(include_children=true)
-```
-
-### シェーダー情報の取得
-
-```
-get_shader_info(event_id=123, stage="pixel")
-```
-
-### パイプライン状態の取得
-
-```
-get_pipeline_state(event_id=123)
-```
-
-### テクスチャデータの取得
-
-```
-# 2Dテクスチャのmip 0を取得
-get_texture_data(resource_id="ResourceId::123")
-
-# 特定のmipレベルを取得
-get_texture_data(resource_id="ResourceId::123", mip=2)
-
-# キューブマップの特定の面を取得 (0=X+, 1=X-, 2=Y+, 3=Y-, 4=Z+, 5=Z-)
-get_texture_data(resource_id="ResourceId::456", slice=3)
-
-# 3Dテクスチャの特定の深度スライスを取得
-get_texture_data(resource_id="ResourceId::789", depth_slice=5)
-```
-
-### バッファデータの部分取得
-
-```
-# バッファ全体を取得
-get_buffer_contents(resource_id="ResourceId::123")
-
-# オフセット256から512バイト取得
-get_buffer_contents(resource_id="ResourceId::123", offset=256, length=512)
-```
-
-## 要件
-
-- Python 3.10+
-- [uv](https://docs.astral.sh/uv/)
-- RenderDoc 1.20+
-
-> **Note**: 動作確認はWindows + DirectX 11環境でのみ行っています。
-> Linux/macOS + Vulkan/OpenGL環境でも動作する可能性がありますが、未検証です。
->
-> **Note**: WebGPU (D3D12 バックエンド) のキャプチャも D3D12 キャプチャとして扱えます。
-> 検査ツール (`get_shader_info` / `get_buffer_contents` / `get_texture_data`) はそのまま
-> 利用可能です。Dawn が WGSL → HLSL にローワリングするため、シェーダーソースは HLSL で返ります。
-
-## ライセンス
-
-MIT
+- [FastMCP](https://github.com/jlowin/fastmcp)
+- [RenderDoc Python API](https://renderdoc.org/docs/python_api/index.html)
+- [RenderDoc Extension Registration](https://renderdoc.org/docs/how/how_python_extension.html)
