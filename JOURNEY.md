@@ -28,6 +28,7 @@
 | Accepted `/review uncommitted`. | Review: 5 findings (1 WARNING + 4 SUGGESTION) — L2 assumes RGBA8; `get_shader_source` returns binary not editable source; double replay per round; `run_l1` omitted `GetDebugMessages`; dead `_stage`. |
 | "Fix all issues." | Fixed: L2 format/size guards; `is_source_text` flag + clarified docs; `replace_shader` force=False; new `check_validation_messages` rule + `run_deterministic(debug_messages=...)`; removed dead `_stage`. 74 tests green. |
 | "git add + push", then "README → 中文, update what we did, update JOURNEY, push." | Committed `c179423` + pushed `origin/main`; translated README to Chinese (new tools + loop + `rdc_harness`); updated JOURNEY in both repos. |
+| "No AGENTS.md for AI agent onboarding?" | Added `AGENTS.md` (project architecture, hard Python 3.6/3.10 boundary, IPC design, test/lint commands, wheel-deliverable scope). Pushed `438bf62`. |
 
 ## Final state
 
