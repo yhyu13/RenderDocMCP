@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "createdAt": "2026-08-20T00:00:00.000Z",
+  "updatedAt": "2026-08-20T00:00:00.000Z",
+  "seedProtocolPath": ".kilo/skills/renderdoc-debug",
+  "entries": [
+    {
+      "id": "seed-reactive-001",
+      "kind": "reactive",
+      "signature": {
+        "stage": "runtime",
+        "errorCode": "RenderDocBridgeError",
+        "messagePattern": "Cannot connect to RenderDoc MCP Bridge",
+        "fileContext": "mcp_server/bridge/client.py"
+      },
+      "rootCause": "The IPC directory does not exist; RenderDoc is not running or the extension is not loaded.",
+      "tags": ["bridge", "ipc", "connection"],
+      "fix": {
+        "type": "shell",
+        "description": "Start RenderDoc, install/enable the MCP Bridge extension, and restart.",
+        "patch": "python scripts/install_extension.py  # then restart RenderDoc and enable under Tools > Manage Extensions"
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-reactive-002",
+      "kind": "reactive",
+      "signature": {
+        "stage": "runtime",
+        "errorCode": "RenderDocBridgeError",
+        "messagePattern": "Request timed out",
+        "fileContext": "mcp_server/bridge/client.py"
+      },
+      "rootCause": "RenderDoc extension is busy, the bridge is not responding, or stale lock/response files are blocking the IPC handshake.",
+      "tags": ["bridge", "ipc", "timeout"],
+      "fix": {
+        "type": "shell",
+        "description": "Clear stale IPC files and restart RenderDoc with the extension enabled.",
+        "patch": "Remove-Item -ErrorAction Ignore $env:TEMP\\renderdoc_mcp\\request.json, $env:TEMP\\renderdoc_mcp\\response.json, $env:TEMP\\renderdoc_mcp\\lock"
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-reactive-003",
+      "kind": "reactive",
+      "signature": {
+        "stage": "runtime",
+        "errorCode": "-32601",
+        "messagePattern": "Method not found: (.+)",
+        "fileContext": "renderdoc_extension/request_handler.py"
+      },
+      "rootCause": "An MCP tool calls a bridge method that is not registered in RequestHandler._methods.",
+      "tags": ["bridge", "method", "registration"],
+      "fix": {
+        "type": "edit",
+        "description": "Add the handler to RequestHandler._methods and implement _handle_<method>.",
+        "patch": "\"ping\": self._handle_ping|||\"ping\": self._handle_ping,\n            \"<method>\": self._handle_<method>"
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-reactive-004",
+      "kind": "reactive",
+      "signature": {
+        "stage": "runtime",
+        "errorCode": "ShaderCompileError",
+        "messagePattern": "compile failed",
+        "fileContext": "rdc_harness/**/*.py"
+      },
+      "rootCause": "The edited HLSL/GLSL source does not compile against the capture API or stage.",
+      "tags": ["shader", "compile", "hlsl"],
+      "fix": {
+        "type": "edit",
+        "description": "Review compiler messages, fix syntax/type errors, and ensure entry point and stage match the original shader.",
+        "patch": "Read the compile result messages; apply the smallest syntax/type fix that preserves the original signature."
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-reactive-005",
+      "kind": "reactive",
+      "signature": {
+        "stage": "runtime",
+        "errorCode": "needs_rebuild",
+        "messagePattern": "L1 deterministic check failed",
+        "fileContext": "rdc_harness/orchestrator.py"
+      },
+      "rootCause": "The shader edit introduced a non-shader regression (binding completeness, validation messages, frame budget).",
+      "tags": ["shader", "l1", "verification"],
+      "fix": {
+        "type": "edit",
+        "description": "Inspect the L1 report, revert the offending change, and re-apply a smaller edit.",
+        "patch": "Read result['l1']; find the failed CheckResult; modify the source to address expected vs actual."
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-proactive-001",
+      "kind": "proactive",
+      "signature": {
+        "stage": "build",
+        "errorCode": "PYTHON_VERSION_EXTENSION",
+        "messagePattern": "Extension code uses Python 3\\.(7|8|9|10) syntax",
+        "fileContext": "renderdoc_extension/**/*.py"
+      },
+      "rootCause": "renderdoc_extension runs on RenderDoc's embedded Python 3.6 and cannot parse modern syntax.",
+      "tags": ["proactive", "python36", "extension"],
+      "fix": {
+        "type": "edit",
+        "description": "Replace modern syntax (walrus, positional-only args, f-string debug, type hints with |) with Python 3.6-compatible equivalents.",
+        "patch": "grep -E ':=|/\\s*,|f\".*{|typing\\\\.' renderdoc_extension/**/*.py"
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-proactive-002",
+      "kind": "proactive",
+      "signature": {
+        "stage": "build",
+        "errorCode": "CROSS_IMPORT_BOUNDARY",
+        "messagePattern": "renderdoc_extension imports (rdc_harness|mcp_server)",
+        "fileContext": "renderdoc_extension/**/*.py"
+      },
+      "rootCause": "The extension interpreter cannot parse rdc_harness/mcp_server code; cross-import breaks the two-Python boundary.",
+      "tags": ["proactive", "boundary", "import"],
+      "fix": {
+        "type": "edit",
+        "description": "Remove the import; duplicate only the minimal data needed or pass raw dicts across the bridge.",
+        "patch": "Remove 'from rdc_harness' or 'from mcp_server' imports in renderdoc_extension."
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    },
+    {
+      "id": "seed-proactive-003",
+      "kind": "proactive",
+      "signature": {
+        "stage": "build",
+        "errorCode": "IPC_FILE_LEAK",
+        "messagePattern": "Stale request\\.json|response\\.json|lock file found",
+        "fileContext": "%TEMP%/renderdoc_mcp/"
+      },
+      "rootCause": "A previous run left stale IPC files that confuse the bridge client or RenderDoc poller.",
+      "tags": ["proactive", "ipc", "cleanup"],
+      "fix": {
+        "type": "shell",
+        "description": "Delete stale IPC files before starting a new bridge session.",
+        "patch": "Remove-Item -ErrorAction Ignore $env:TEMP\\renderdoc_mcp\\request.json, $env:TEMP\\renderdoc_mcp\\response.json, $env:TEMP\\renderdoc_mcp\\lock"
+      },
+      "occurrences": 0,
+      "contributingProjects": [],
+      "createdAt": "2026-08-20T00:00:00.000Z",
+      "lastMatchedAt": "2026-08-20T00:00:00.000Z"
+    }
+  ],
+  "rules": [],
+  "evolutionLog": []
+}

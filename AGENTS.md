@@ -2,6 +2,17 @@
 
 RenderDoc MCP server: an AI client talks to an MCP server process, which talks over file-based IPC to a Python extension running inside RenderDoc's embedded interpreter. Plus `rdc_harness`, a pure-Python (no GPU) shader edit/replay/verification orchestration library.
 
+## Agent skills
+
+Reusable workflows for this repo live in `.kilo/skills/`:
+
+- `renderdoc-capture-analysis` — token-efficient capture inspection and reverse lookups.
+- `renderdoc-shader-fix` — closed-loop shader edit/replace/replay/verify.
+- `renderdoc-extension` — safely modify the RenderDoc Python 3.6 extension.
+- `renderdoc-debug` — living debug protocol (seed at `seed-protocol.json`).
+
+Use these skills for multi-step RenderDoc work; use direct tool calls only for one-off reads.
+
 ## Commands
 
 ```bash
