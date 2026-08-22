@@ -1,10 +1,10 @@
 # RenderDoc MCP Server
 
-作为 RenderDoc UI 扩展运行的 MCP 服务器。AI 助手可以访问 RenderDoc 的捕获数据，辅助 DirectX 11/12 的图形调试。
+作为 RenderDoc UI 扩展运行的 MCP 服务器。AI 助手可以访问 RenderDoc 的捕获数据，辅助 D3D11/D3D12/**OpenGL** 的图形调试。
 
 > **兼容性说明**: 除 D3D11/D3D12 外，WebGPU（D3D12 后端）的捕获也可作为 D3D12 捕获进行检查。
 > 检查工具（`get_shader_info` / `get_buffer_contents` / `get_texture_data`）可直接使用；
-> 着色器源码是 Dawn 将 WGSL→HLSL 降级后的 HLSL。
+> 着色器源码是 Dawn 将 WGSL→HLSL 降级后的 HLSL。OpenGL 捕获走同一套工具（已在 `frame480.rdc` 上实测）。
 
 ## 架构
 
@@ -38,6 +38,7 @@ RenderDocMCP/
 │   ├── orchestrator.py                # shader 编辑 → 重放 → 验证循环
 │   ├── renderdoc_backend.py           # 通过 MCP bridge 驱动扩展的适配器
 │   ├── report.py                      # before/after 修复报告
+│   ├── export.py                      # unified diff + 最终 shader + golden RT 基线
 │   └── __main__.py                    # CLI（`python -m rdc_harness frame.json`）
 │
 ├── renderdoc_extension/               # RenderDoc 扩展
@@ -116,7 +117,7 @@ RenderDocMCP/
 | `list_shader_encodings` | 该捕获 API 支持的 target / custom 编码 |
 | `list_shaders` / `shader_map` | 帧内 shader 列表与 event×stage 映射 |
 | `search_shaders` | 在反汇编中搜子串（短 snippet，不是整份 ISA） |
-| `compile_custom_shader` | `BuildCustomShader`（可视化 shader，不是 target 替换） |
+| `compile_custom_shader` | `BuildCustomShader`（可视化 shader，不是 target 替换；OpenGL GLSL `<420` 且含 `layout binding` 时自动升到 `#version 420`） |
 
 ### 计数器 / 快照 / 捕获节（Phase 5）
 
@@ -231,6 +232,21 @@ get_action_timings(marker_filter="Camera.Render", exclude_markers=["GUI.Repaint"
 - RenderDoc 扩展仅使用 Python 3.6 标准库
 - ReplayController 访问通过 `BlockInvoke` 完成
 - `rdc_harness` 运行于 AI/MCP 侧（Python ≥ 3.10），**不可**在 `renderdoc_extension/` 内导入（其内置 Python 3.6 无法解析现代注解）
+- **不要伪造 `ResourceId`**。C++ `ResourceId.id` 是 private；`rd.ResourceId(); rid.id = n` 得到的是 `ResourceId::0`（Null）。解析必须对照 `GetTextures` / `GetBuffers` / `GetResources` 的**活对象**，`compile_shader` 返回的 id 缓存在本进程里再交给 `replace_shader`。
+- **`GetCaptureFile` 在 `ReplayManager` 上**（`ctx.Replay().GetCaptureAccess()`），不在 `CaptureContext`。MCP `LoadCapture` 后 `ctx.GetCaptureFile()` 会是 `None`。节/格式/转换走 `pick_capture_access()`；`embed_dependencies` 优先 `ctx.EmbedDependentFiles()`。
+- 改完 `renderdoc_extension/` 必须 `python scripts/install_extension.py` 并**重启 RenderDoc**，否则测的还是旧拷贝。
+- `RegisterReplacement` / `UnregisterReplacement` 必须在 `BlockInvoke` **之外**调用（UI 线程）。放进 replay callback 会让下一次 `SetFrameEvent(force=True)` 死锁。
+- `replay_event` / `replace_shader` / `compile_shader` / `pick_pixel` 走 120s IPC 超时。OpenGL `frame480` 上带真实替换的 `replay_event(550)` 已实测返回 `{replayed:true}`；若将来再卡住，`pick_pixel` 自己会 `SetFrameEvent(force=True)`。
+
+## 已知坑（OpenGL `frame480` 实测）
+
+- `compile_shader` → `replace_shader` 必须用**同一次会话**返回的 `resource_id`；不要手拼 `ResourceId::N`。
+- `find_draws_by_resource` 禁止用 Null 对 Null（未绑定的 Hull/Domain 都是 `ResourceId::0`）。
+- `get_shader_info` 常量缓冲走 `PipeState.GetConstantBlock`（不是 `GetConstantBuffer`）。
+- `list_shader_encodings` / mesh `attributes[].format` 用枚举 `.name` / `ResourceFormat.Name()`，不要 `str(swig_ptr)`。
+- `Descriptor.numMips` 在部分 API 上是垃圾值（曾出现 233）；超过 1–32 时回退到纹理 `mips`。
+- OpenGL 捕获上 `debug_pixel` 通常 `available: false`（无 debug info / API 不支持）；`compile_flags="debug"` 是 D3DCOMPILE_*，不会给 GLSL 造调试符号。
+- 实测记录：`live-tool-validation-frame480.md`（产品闭环 + ResourceId/GetCaptureFile 复测）。
 
 ## 测试
 

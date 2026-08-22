@@ -54,8 +54,8 @@ The real RenderDoc adapter is `RenderDocShaderBackend`; the loop itself is unit-
    - Inspect compiler messages on failure.
 
 4. **Replace and replay**
-   - `replace_shader(event_id, stage, compiled_resource_id)`
-   - `replay_event(event_id)`
+   - `replace_shader(event_id, stage, compiled_resource_id)` — wait for the echoed compiled id, not `ResourceId::0`.
+   - `replay_event(event_id)` (120s timeout). OpenGL `frame480` with a real replacement returned `{replayed:true}`. If a later capture hangs, skip the separate replay: `pick_pixel` already calls `SetFrameEvent(force=True)`. Never call `RegisterReplacement` inside `BlockInvoke`.
 
 5. **Verify**
    - `get_debug_messages()` → L1 validation-layer messages.

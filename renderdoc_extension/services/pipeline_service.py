@@ -5,6 +5,7 @@ Pipeline state service for RenderDoc.
 import renderdoc as rd
 
 from ..utils import Parsers, Serializers, Helpers
+from ..utils.resource_id import sane_mip_count
 
 
 class PipelineService:
@@ -198,12 +199,14 @@ class PipelineService:
                     "resource_id": str(srv.descriptor.resource),
                 }
 
-                res_info.update(
-                    self._get_resource_details(controller, srv.descriptor.resource)
-                )
+                details = self._get_resource_details(controller, srv.descriptor.resource)
+                res_info.update(details)
 
+                tex_mips = details.get("mip_levels") if isinstance(details, dict) else None
                 res_info["first_mip"] = srv.descriptor.firstMip
-                res_info["num_mips"] = srv.descriptor.numMips
+                res_info["num_mips"] = sane_mip_count(
+                    srv.descriptor.numMips, fallback=tex_mips
+                )
                 res_info["first_slice"] = srv.descriptor.firstSlice
                 res_info["num_slices"] = srv.descriptor.numSlices
 
@@ -387,17 +390,40 @@ class PipelineService:
             }
 
             try:
-                bind = pipe.GetConstantBuffer(stage, i, 0)
-                if bind.resourceId != rd.ResourceId.Null():
+                bind = None
+                for getter in ("GetConstantBlock", "GetConstantBuffer"):
+                    fn = getattr(pipe, getter, None)
+                    if fn is None:
+                        continue
+                    try:
+                        bind = fn(stage, i, 0)
+                        break
+                    except Exception:
+                        bind = None
+                resource = None
+                byte_offset = 0
+                byte_size = 0
+                if bind is not None:
+                    resource = getattr(bind, "resourceId", None)
+                    if resource is None:
+                        desc = getattr(bind, "descriptor", None)
+                        resource = getattr(desc, "resource", None) if desc is not None else None
+                    byte_offset = getattr(bind, "byteOffset", 0) or getattr(
+                        getattr(bind, "descriptor", None), "byteOffset", 0
+                    ) or 0
+                    byte_size = getattr(bind, "byteSize", 0) or getattr(
+                        getattr(bind, "descriptor", None), "byteSize", 0
+                    ) or 0
+                if resource is not None and resource != rd.ResourceId.Null():
                     variables = controller.GetCBufferVariableContents(
                         pipe.GetGraphicsPipelineObject(),
                         reflection.resourceId,
                         stage,
                         reflection.entryPoint,
                         i,
-                        bind.resourceId,
-                        bind.byteOffset,
-                        bind.byteSize,
+                        resource,
+                        byte_offset,
+                        byte_size,
                     )
                     cb_info["variables"] = Serializers.serialize_variables(variables)
             except Exception as e:

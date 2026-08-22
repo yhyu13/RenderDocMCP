@@ -18,7 +18,11 @@ class PixelService:
     def _resolve_texture(self, controller, resource_id, event_id):
         """Resolve a texture ResourceId; fall back to the action's first color output."""
         if resource_id:
-            return Parsers.parse_resource_id(resource_id)
+            from ..utils.rid_cache import resolve_live, remember
+            rid = resolve_live(controller, self.ctx, resource_id)
+            if rid is None:
+                raise ValueError("Texture not found: %s" % resource_id)
+            return remember(rid)
 
         action = self.ctx.GetAction(event_id)
         if action is not None:

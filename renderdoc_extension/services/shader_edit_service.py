@@ -19,6 +19,7 @@ import renderdoc as rd
 
 from ..utils import Parsers
 from ..utils.compile_opts import resolve_compile_flags
+from ..utils.rid_cache import remember, resolve_live
 
 
 class ShaderEditService:
@@ -139,6 +140,7 @@ class ShaderEditService:
                 result["error"] = "Shader compile failed: %s" % (messages or "no messages")
                 return
 
+            remember(shader_id)
             result["compiled"] = {
                 "resource_id": str(shader_id),
                 "entry_point": entry,
@@ -172,10 +174,19 @@ class ShaderEditService:
             if original == rd.ResourceId.Null():
                 result["error"] = "No %s shader bound" % stage
                 return
+            remember(original)
 
-            replacement = Parsers.parse_resource_id(compiled_resource_id)
+            replacement = resolve_live(controller, self.ctx, compiled_resource_id)
+            if replacement is None:
+                result["error"] = (
+                    "compiled shader ResourceId not found: %s "
+                    "(compile_shader result must be used in this session)"
+                    % compiled_resource_id
+                )
+                return
             controller.ReplaceResource(original, replacement)
-
+            result["original"] = original
+            result["replacement_rid"] = replacement
             result["replacement"] = {
                 "original_resource_id": str(original),
                 "replacement_resource_id": str(replacement),
@@ -187,7 +198,20 @@ class ShaderEditService:
 
         if result["error"]:
             raise ValueError(result["error"])
-        return result["replacement"]
+        # RegisterReplacement is a UI-thread CaptureContext call. Doing it
+        # inside BlockInvoke deadlocks the next replay (replay thread waits
+        # for UI, UI waits for replay). Match replace_resource: register after.
+        ui_registered = False
+        try:
+            self.ctx.RegisterReplacement(
+                result.get("original"), result.get("replacement_rid")
+            )
+            ui_registered = True
+        except Exception:
+            ui_registered = False
+        out = result["replacement"]
+        out["ui_registered"] = ui_registered
+        return out
 
     def remove_shader_replacement(self, event_id, stage):
         """Remove any shader replacement at event/stage, restoring the original."""
@@ -207,6 +231,7 @@ class ShaderEditService:
                 return
 
             controller.RemoveReplacement(original)
+            result["original"] = original
             result["removed"] = {
                 "resource_id": str(original),
                 "event_id": event_id,
@@ -217,6 +242,10 @@ class ShaderEditService:
 
         if result["error"]:
             raise ValueError(result["error"])
+        try:
+            self.ctx.UnregisterReplacement(result.get("original"))
+        except Exception:
+            pass
         return result["removed"]
 
     def replay_event(self, event_id):
@@ -267,8 +296,9 @@ class ShaderEditService:
             raise ValueError("No capture loaded")
         out = {"target": [], "custom": []}
         try:
+            from ..utils.resource_id import shader_encoding_name
             for enc in self.ctx.CustomShaderEncodings() or []:
-                out["custom"].append(str(enc))
+                out["custom"].append(shader_encoding_name(enc))
         except Exception:
             pass
 
@@ -282,8 +312,9 @@ class ShaderEditService:
                     encs = controller.GetCustomShaderEncodings()
                 except Exception:
                     encs = []
+            from ..utils.resource_id import shader_encoding_name
             for enc in encs or []:
-                out["target"].append(str(enc))
+                out["target"].append(shader_encoding_name(enc))
 
         self._invoke(callback)
         return out
@@ -448,6 +479,16 @@ class ShaderEditService:
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
         result = {"compiled": None, "error": None}
+        if (encoding or "").lower() == "glsl":
+            src = source.lstrip()
+            if src.startswith("#version") and "layout" in source and "binding" in source:
+                first = src.splitlines()[0]
+                ver = first.replace("#version", "").strip().split()[0]
+                try:
+                    if int(ver) < 420:
+                        source = source.replace(first, "#version 420", 1)
+                except Exception:
+                    pass
 
         def callback(controller):
             stage_enum = Parsers.parse_stage(stage)
@@ -463,6 +504,7 @@ class ShaderEditService:
             if shader_id == rd.ResourceId.Null():
                 result["error"] = "Custom shader compile failed: %s" % (messages or "no messages")
                 return
+            remember(shader_id)
             result["compiled"] = {
                 "resource_id": str(shader_id),
                 "entry_point": entry,

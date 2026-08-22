@@ -7,6 +7,8 @@ import base64
 import renderdoc as rd
 
 from ..utils import Parsers
+from ..utils.resource_id import ids_equal
+from ..utils.rid_cache import remember, resolve_live
 from ..utils.tex_stats import (
     channels_from_pixel,
     histogram_channels,
@@ -25,14 +27,25 @@ class ResourceService:
         self._invoke = invoke_fn
 
     def _find_texture_by_id(self, controller, resource_id):
-        """Find texture by resource ID"""
-        target_id = Parsers.extract_numeric_id(resource_id)
-        for tex in controller.GetTextures():
-            tex_id_str = str(tex.resourceId)
-            tex_id = Parsers.extract_numeric_id(tex_id_str)
-            if tex_id == target_id:
+        """Find texture by resource ID (numeric match against live objects)."""
+        for tex in controller.GetTextures() or []:
+            remember(tex.resourceId)
+            if ids_equal(tex.resourceId, resource_id):
                 return tex
         return None
+
+    def _find_buffer_by_id(self, controller, resource_id):
+        for buf in controller.GetBuffers() or []:
+            remember(buf.resourceId)
+            if ids_equal(buf.resourceId, resource_id):
+                return buf
+        return None
+
+    def _resolve_rid(self, resource_id, controller=None):
+        rid = resolve_live(controller, self.ctx, resource_id)
+        if rid is None:
+            raise ValueError("Resource not found: %s" % resource_id)
+        return rid
 
     def get_buffer_contents(self, resource_id, offset=0, length=0):
         """Get buffer data"""
@@ -42,23 +55,11 @@ class ResourceService:
         result = {"data": None, "error": None}
 
         def callback(controller):
-            # Parse resource ID
-            try:
-                rid = Parsers.parse_resource_id(resource_id)
-            except Exception:
-                result["error"] = "Invalid resource ID: %s" % resource_id
-                return
-
-            # Find buffer
-            buf_desc = None
-            for buf in controller.GetBuffers():
-                if buf.resourceId == rid:
-                    buf_desc = buf
-                    break
-
+            buf_desc = self._find_buffer_by_id(controller, resource_id)
             if not buf_desc:
                 result["error"] = "Buffer not found: %s" % resource_id
                 return
+            rid = buf_desc.resourceId
 
             # Get data
             actual_length = length if length > 0 else buf_desc.length
@@ -88,6 +89,7 @@ class ResourceService:
         name_filter = (name or "").lower()
         items = []
         for res in self.ctx.GetResources() or []:
+            remember(res.resourceId)
             rid = str(res.resourceId)
             rtype = str(getattr(res, "type", "") or "")
             rname = ""
@@ -115,7 +117,17 @@ class ResourceService:
     def get_resource(self, resource_id):
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
-        rid = Parsers.parse_resource_id(resource_id)
+        rid = resolve_live(None, self.ctx, resource_id)
+        if rid is None:
+            result = {"rid": None}
+
+            def callback(controller):
+                result["rid"] = resolve_live(controller, self.ctx, resource_id)
+
+            self._invoke(callback)
+            rid = result["rid"]
+        if rid is None:
+            raise ValueError("Resource not found: %s" % resource_id)
         desc = None
         try:
             desc = self.ctx.GetResource(rid)
@@ -173,11 +185,17 @@ class ResourceService:
         """
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
-        original = Parsers.parse_resource_id(original_resource_id)
-        replacement = Parsers.parse_resource_id(replacement_resource_id)
-        result = {"error": None}
+        result = {"error": None, "original": None, "replacement": None}
 
         def callback(controller):
+            try:
+                original = self._resolve_rid(original_resource_id, controller)
+                replacement = self._resolve_rid(replacement_resource_id, controller)
+            except Exception as e:
+                result["error"] = str(e)
+                return
+            result["original"] = original
+            result["replacement"] = replacement
             try:
                 controller.ReplaceResource(original, replacement)
             except Exception as e:
@@ -186,6 +204,8 @@ class ResourceService:
         self._invoke(callback)
         if result["error"]:
             raise ValueError(result["error"])
+        original = result["original"]
+        replacement = result["replacement"]
         ui_registered = False
         try:
             self.ctx.RegisterReplacement(original, replacement)
@@ -206,10 +226,15 @@ class ResourceService:
     def restore_resource(self, original_resource_id):
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
-        original = Parsers.parse_resource_id(original_resource_id)
-        result = {"error": None}
+        result = {"error": None, "original": None}
 
         def callback(controller):
+            try:
+                original = self._resolve_rid(original_resource_id, controller)
+            except Exception as e:
+                result["error"] = str(e)
+                return
+            result["original"] = original
             try:
                 controller.RemoveReplacement(original)
             except Exception as e:
@@ -218,6 +243,7 @@ class ResourceService:
         self._invoke(callback)
         if result["error"]:
             raise ValueError(result["error"])
+        original = result["original"]
         try:
             self.ctx.UnregisterReplacement(original)
         except Exception:
@@ -473,10 +499,9 @@ class ResourceService:
         result = {"data": None, "error": None}
 
         def callback(controller):
-            try:
-                rid = Parsers.parse_resource_id(resource_id)
-            except Exception:
-                result["error"] = "Invalid resource ID: %s" % resource_id
+            rid = resolve_live(controller, self.ctx, resource_id)
+            if rid is None:
+                result["error"] = "Resource not found: %s" % resource_id
                 return
             try:
                 usages = controller.GetUsage(rid)

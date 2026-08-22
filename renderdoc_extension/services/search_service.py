@@ -5,6 +5,8 @@ Reverse lookup search service for RenderDoc.
 import renderdoc as rd
 
 from ..utils import Parsers, Helpers
+from ..utils.resource_id import ids_equal
+from ..utils.rid_cache import remember
 
 
 class SearchService:
@@ -145,14 +147,14 @@ class SearchService:
 
     def find_draws_by_resource(self, resource_id):
         """Find all draw calls using a specific resource ID (exact match)."""
-        target_rid = Parsers.parse_resource_id(resource_id)
         stages_to_check = Helpers.get_all_shader_stages()
 
         def matcher(pipe, controller, action, ctx):
-            # Check shaders
+            # Check shaders — never compare against a forged Null ResourceId.
             for stage in stages_to_check:
                 shader = pipe.GetShader(stage)
-                if shader == target_rid:
+                remember(shader)
+                if ids_equal(shader, resource_id):
                     return "%s shader" % str(stage)
 
             # Check SRVs and UAVs
@@ -160,7 +162,9 @@ class SearchService:
                 try:
                     srvs = pipe.GetReadOnlyResources(stage, False)
                     for srv in srvs:
-                        if srv.descriptor.resource == target_rid:
+                        live = srv.descriptor.resource
+                        remember(live)
+                        if ids_equal(live, resource_id):
                             return "%s SRV slot %d" % (str(stage), srv.access.index)
                 except Exception:
                     pass
@@ -168,7 +172,9 @@ class SearchService:
                 try:
                     uavs = pipe.GetReadWriteResources(stage, False)
                     for uav in uavs:
-                        if uav.descriptor.resource == target_rid:
+                        live = uav.descriptor.resource
+                        remember(live)
+                        if ids_equal(live, resource_id):
                             return "%s UAV slot %d" % (str(stage), uav.access.index)
                 except Exception:
                     pass
@@ -178,9 +184,11 @@ class SearchService:
                 om = pipe.GetOutputMerger()
                 if om:
                     for i, rt in enumerate(om.renderTargets):
-                        if rt.resourceId == target_rid:
+                        remember(rt.resourceId)
+                        if ids_equal(rt.resourceId, resource_id):
                             return "RenderTarget[%d]" % i
-                    if om.depthTarget.resourceId == target_rid:
+                    remember(om.depthTarget.resourceId)
+                    if ids_equal(om.depthTarget.resourceId, resource_id):
                         return "DepthTarget"
             except Exception:
                 pass

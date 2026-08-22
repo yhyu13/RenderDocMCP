@@ -107,3 +107,46 @@ The **WebGPU capture** workstream (Chrome D3D12 process-injection capture, `capt
 | Me | You |
 |---|---|
 | "push further" ranked: (1) fix→patch + golden baselines, (2) Convert/EmbedDependencies, (3) compile_flags, (4) UAV-inject research not a tool. | (3) `compile_shader(..., compile_flags="debug")` → D3DCOMPILE_DEBUG+SKIP_OPTIMIZATION. (2) `embed_dependencies` / `remove_dependencies` / `list_capture_formats` / `convert_capture`. (1) `rdc_harness.export`: unified diff + `.hlsl` + hashed golden RT store. UAV-inject not shipped. Real-GPU loop still the remaining validation. |
+| Live OpenGL `frame480` validation: 9 broken, 7 degraded. Shader edit loop returns `ResourceId::0`. | Root causes: (a) `ResourceId.id` is private — `rid.id = n` forges Null; resolve by scanning live objects + compile cache. (b) `GetCaptureFile` is on `ReplayManager`, not `CaptureContext`. Also: `GetConstantBlock` not `GetConstantBuffer`; encoding/format Name(); `num_mips` sanity; GLSL custom-shader `#version 420`. |
+
+---
+
+## Live OpenGL capture: ResourceId::0 + GetCaptureFile wall (2026-08-22)
+
+> Capture: `rdoc_frame_frame480.rdc` (OpenGL, 40 actions, 1280×720), RenderDoc v1.45. 46 tools: 30 pass / 7 degraded / 9 broken. The shader-edit loop (the product) did not apply.
+
+| Me | You |
+|---|---|
+| Full MCP tool validation against live OpenGL capture. Shader edit loop: `replace_shader` returns `ResourceId::0`, `pick_pixel` unchanged after replay. Export/buffer/get_resource all fail for IDs that `get_texture_info` accepts. Nine tools: `GetCaptureFile unavailable`. | Two root causes, both confirmed in v1.45 headers/docs. (a) C++ `ResourceId.id` is private — forging `rd.ResourceId(); rid.id = n` stays Null; Hull-stage false matches were `Null == Null`. Fix: scan live `GetTextures`/`GetBuffers`/`GetResources` + cache compile-time ResourceIds. (b) `GetCaptureFile` is on `ReplayManager` (`ctx.Replay().GetCaptureAccess()`), not `CaptureContext`. Also patched: `GetConstantBlock`, encoding/format names, `num_mips` 1–32 clamp, thumbnail via `GetOutputTargets`, GLSL custom-shader `#version 420`. 134 tests green (`py -3.13`). |
+
+### Deliverables
+
+- `utils/resource_id.py` — GPU-free numeric parse / Null rejection / encoding+format names / mip sanity.
+- `utils/rid_cache.py` — process-local cache of *live* ResourceId objects; `compile_shader`/`list_resources` remember them.
+- `utils/capture_access.py` — ReplayManager first, then CaptureContext.
+- Call sites no longer assign `rid.id`. `find_draws_by_resource` uses `ids_equal` (rejects Null).
+- Reinstall required: `python scripts/install_extension.py` + restart RenderDoc before re-testing `frame480`.
+
+### Live re-run (closed 2026-08-23)
+
+Product loop, ResourceId lookup, GetCaptureFile/ReplayManager, and encoding names all proven on `frame480`. Evidence: `live-tool-validation-frame480.md`. Remaining limits (`debug_pixel` on GL, 4 MiB `get_section` cap, no `SetTextureData`) are API/capture constraints, not open bugs.
+
+---
+
+## Replay-with-replacement hang (2026-08-22, live re-run)
+
+> Live re-test confirmed ResourceId::0 **fixed** (`replace_shader` echoes `ResourceId::1000…297`) and GetCaptureFile **fixed** (`list_sections` returned the 122 MB framecapture). The shader-edit loop still cannot finish: `replay_event` after a real replacement times out / deadlocks.
+
+| Me | You |
+|---|---|
+| Independent live verification. `replace_shader` now returns the compiled id. Then `replay_event(550)` after replacement: qrenderdoc died once; second attempt timed out, process idle, all later calls timed out. Bare `replay_event` without replacement worked. `list_shader_encodings` still `"2"`. | Two code bugs the live hang exposed. (1) `replace_shader` called `RegisterReplacement` *inside* `BlockInvoke` — UI call on the replay thread; next `SetFrameEvent(force=True)` can deadlock (replay waits for UI, UI waits for replay). `replace_resource` already registered after invoke; `replace_shader` now matches. (2) `replay_event` sat on the 30s DEFAULT_TIMEOUT; a forced OpenGL replay with a real replacement is not a no-op. Moved `replay_event`/`replace_shader`/`compile_shader`/`pick_pixel` to 120s DEBUG_TIMEOUT. Encoding `"2"` mapped via v1.45 ordinal table (GLSL=2). Workaround if replay still hangs: `pick_pixel` already does `SetFrameEvent(force=True)` — skip a separate `replay_event`. |
+
+---
+
+## Live product loop proven (2026-08-23)
+
+> Hang-fix reinstalled. `frame480` reopened. Product loop ran end-to-end on a live GPU. Report: `live-tool-validation-frame480.md`.
+
+| Me | You |
+|---|---|
+| Idle continuation: do not declare the hang-fix done until `compile_shader → replace_shader → replay_event → pick_pixel` changes a real pixel. | Reinstalled extension, relaunched `qrenderdoc` on `frame480`. Pre-pixel `[0.011,0.011,0.011,0.945]` → compile `…297` → replace (`ui_registered: true`) → `replay_event(550)` `{replayed:true}` → post-pixel `[1,0,1,1]`. Restore returned the original pixel. `get_resource(::56/::125)`, `get_buffer_contents(::125)`, `export_texture(::56)` (3523-byte PNG), `list_sections` (122 MB framecapture), `embed_dependencies`, `write_section`, encodings `["GLSL"]` all live. `debug_pixel` unavailable (no GL debug info). 135/135 tests. |

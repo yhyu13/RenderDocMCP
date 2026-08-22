@@ -4,6 +4,7 @@ import base64
 
 import renderdoc as rd
 
+from ..utils.capture_access import pick_capture_access
 from ..utils.counters import counter_value
 from ..utils.sections import (
     SECTION_LOAD_CAP,
@@ -128,13 +129,9 @@ class AnalysisService:
     def list_sections(self):
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
-        cap = None
-        try:
-            cap = self.ctx.GetCaptureFile()
-        except Exception:
-            cap = None
+        cap, reason = pick_capture_access(self.ctx)
         if cap is None:
-            return {"count": 0, "sections": [], "note": "GetCaptureFile unavailable"}
+            return {"count": 0, "sections": [], "note": reason}
         n = 0
         try:
             n = int(cap.GetSectionCount())
@@ -163,13 +160,9 @@ class AnalysisService:
         """
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
-        cap = None
-        try:
-            cap = self.ctx.GetCaptureFile()
-        except Exception:
-            cap = None
+        cap, reason = pick_capture_access(self.ctx)
         if cap is None:
-            raise ValueError("GetCaptureFile unavailable")
+            raise ValueError(reason)
         if index is None:
             if not name:
                 raise ValueError("index or name is required")
@@ -218,13 +211,9 @@ class AnalysisService:
             raise ValueError("name is required")
         enum_name = section_type_enum_name(section_type)
         raw = encode_section_contents(contents)
-        cap = None
-        try:
-            cap = self.ctx.GetCaptureFile()
-        except Exception:
-            cap = None
+        cap, reason = pick_capture_access(self.ctx)
         if cap is None:
-            raise ValueError("GetCaptureFile unavailable")
+            raise ValueError(reason)
         try:
             props = rd.SectionProperties()
             props.name = str(name)

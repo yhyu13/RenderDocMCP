@@ -24,8 +24,21 @@ class RenderDocBridgeError(Exception):
     pass
 
 
-# Shader-step debug can exceed the default 30s file-IPC wait.
-DEBUG_METHODS = frozenset({"debug_pixel", "debug_vertex", "debug_thread"})
+# Shader-step debug and forced replay-with-replacement can exceed 30s.
+# Live OpenGL frame480: replay_event after a real ReplaceResource hung the
+# single-threaded QTimer/BlockInvoke IPC at DEFAULT_TIMEOUT.
+DEBUG_METHODS = frozenset({
+    "debug_pixel",
+    "debug_vertex",
+    "debug_thread",
+    "replay_event",
+    "replace_shader",
+    "compile_shader",
+    "pick_pixel",
+    "get_pixel_history",
+    "save_capture",
+    "replace_resource",
+})
 DEBUG_TIMEOUT = 120.0
 DEFAULT_TIMEOUT = 30.0
 

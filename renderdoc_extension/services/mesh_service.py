@@ -124,7 +124,8 @@ class MeshService:
                     "byte_offset": getattr(attr, "byteOffset", 0),
                 }
                 try:
-                    info["format"] = str(attr.format)
+                    from ..utils.resource_id import resource_format_name
+                    info["format"] = resource_format_name(attr.format)
                 except Exception:
                     info["format"] = ""
                 payload["input"]["attributes"].append(info)

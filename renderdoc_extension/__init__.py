@@ -1,6 +1,6 @@
 """
 RenderDoc MCP Bridge Extension
-Provides socket server for external MCP server communication.
+Provides file-based IPC for external MCP server communication.
 """
 
 from . import socket_server
@@ -53,7 +53,7 @@ def register(version, ctx):
             print("[MCP Bridge] Could not register menu: %s" % str(e))
 
     print("[MCP Bridge] Extension loaded (RenderDoc %s)" % version)
-    print("[MCP Bridge] Server listening on 127.0.0.1:19876")
+    print("[MCP Bridge] File IPC dir: %s" % socket_server.IPC_DIR)
 
 
 def unregister():
@@ -69,7 +69,8 @@ def _show_status(ctx, data):
     """Show status dialog"""
     if _server and _server.is_running():
         ctx.Extensions().MessageDialog(
-            "MCP Bridge is running on port 19876", "MCP Bridge Status"
+            "MCP Bridge is running\nIPC dir: %s" % socket_server.IPC_DIR,
+            "MCP Bridge Status",
         )
     else:
         ctx.Extensions().ErrorDialog("MCP Bridge is not running", "MCP Bridge Status")

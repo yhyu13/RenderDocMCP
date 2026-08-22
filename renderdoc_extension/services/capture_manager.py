@@ -179,15 +179,13 @@ class CaptureManager:
         }
 
     def _capture_file(self):
+        from ..utils.capture_access import pick_capture_access
+
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
-        cap = None
-        try:
-            cap = self.ctx.GetCaptureFile()
-        except Exception:
-            cap = None
+        cap, reason = pick_capture_access(self.ctx)
         if cap is None:
-            raise ValueError("GetCaptureFile unavailable")
+            raise ValueError(reason)
         return cap
 
     def _result_details(self, details, what):
@@ -204,6 +202,16 @@ class CaptureManager:
 
     def embed_dependencies(self):
         """Embed shader-debug files into the capture (makes debug_* portable)."""
+        try:
+            details = self.ctx.EmbedDependentFiles()
+            self._result_details(details, "EmbedDependentFiles")
+            return {
+                "success": True,
+                "embedded": True,
+                "note": "shader debug files stored in the capture; save_capture to persist a copy",
+            }
+        except Exception:
+            pass
         cap = self._capture_file()
         try:
             details = cap.EmbedDependenciesIntoCapture()
@@ -218,6 +226,12 @@ class CaptureManager:
 
     def remove_dependencies(self):
         """Remove previously embedded shader-debug files from the capture."""
+        try:
+            details = self.ctx.RemoveDependentFiles()
+            self._result_details(details, "RemoveDependentFiles")
+            return {"success": True, "embedded": False}
+        except Exception:
+            pass
         cap = self._capture_file()
         try:
             details = cap.RemoveDependenciesFromCapture()
@@ -227,12 +241,28 @@ class CaptureManager:
         return {"success": True, "embedded": False}
 
     def list_capture_formats(self):
-        cap = self._capture_file()
+        from ..utils.capture_access import pick_capture_access
+
         formats = []
-        try:
-            items = cap.GetCaptureFileFormats() or []
-        except Exception as e:
-            raise ValueError("GetCaptureFileFormats failed: %s" % str(e))
+        items = None
+        cap, _reason = pick_capture_access(self.ctx)
+        if cap is not None:
+            getter = getattr(cap, "GetCaptureFileFormats", None)
+            if getter is not None:
+                try:
+                    items = getter()
+                except Exception:
+                    items = None
+        if items is None:
+            try:
+                tmp = rd.OpenCaptureFile()
+                items = tmp.GetCaptureFileFormats()
+                try:
+                    tmp.Shutdown()
+                except Exception:
+                    pass
+            except Exception as e:
+                raise ValueError("GetCaptureFileFormats unavailable: %s" % str(e))
         for fmt in items:
             formats.append({
                 "extension": getattr(fmt, "extension", ""),
@@ -246,17 +276,29 @@ class CaptureManager:
         """Export/convert the open capture to another representation on disk."""
         if not filename:
             raise ValueError("filename is required")
-        cap = self._capture_file()
         try:
-            details = cap.Convert(filename, filetype or "rdc", None, None)
-        except TypeError:
+            cap = self._capture_file()
+        except Exception:
+            cap = None
+        if cap is not None and hasattr(cap, "Convert"):
             try:
+                details = cap.Convert(filename, filetype or "rdc", None, None)
+            except TypeError:
                 details = cap.Convert(filename, filetype or "rdc", None)
+            self._result_details(details, "Convert")
+        else:
+            fmt = None
+            listing = self.list_capture_formats()
+            want = (filetype or "rdc").lower()
+            for item in listing.get("formats") or []:
+                ext = (item.get("extension") or "").lower()
+                if ext == want or ext == want.lstrip("."):
+                    fmt = item
+                    break
+            try:
+                self.ctx.ExportCapture(fmt, filename)
             except Exception as e:
-                raise ValueError("Convert failed: %s" % str(e))
-        except Exception as e:
-            raise ValueError("Convert failed: %s" % str(e))
-        self._result_details(details, "Convert")
+                raise ValueError("ExportCapture failed: %s" % str(e))
         return {
             "success": True,
             "path": filename,

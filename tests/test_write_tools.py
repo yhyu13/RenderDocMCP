@@ -38,6 +38,10 @@ class TestBridgeTimeout(unittest.TestCase):
         self.assertEqual(b.timeout_for("debug_pixel"), DEBUG_TIMEOUT)
         self.assertEqual(b.timeout_for("debug_vertex"), DEBUG_TIMEOUT)
         self.assertEqual(b.timeout_for("debug_thread"), DEBUG_TIMEOUT)
+        self.assertEqual(b.timeout_for("replay_event"), DEBUG_TIMEOUT)
+        self.assertEqual(b.timeout_for("replace_shader"), DEBUG_TIMEOUT)
+        self.assertEqual(b.timeout_for("compile_shader"), DEBUG_TIMEOUT)
+        self.assertEqual(b.timeout_for("pick_pixel"), DEBUG_TIMEOUT)
         self.assertEqual(b.timeout_for("debug_pixel", timeout=9), 9.0)
 
 
@@ -340,6 +344,23 @@ class TestReplaceResourceNote(unittest.TestCase):
         self.assertIn("RegisterReplacement", src)
         self.assertIn("GetMinMax", src)
         self.assertIn("WriteSection", src)
+
+    def test_replace_shader_registers_after_blockinvoke(self):
+        src = (
+            ROOT / "renderdoc_extension" / "services" / "shader_edit_service.py"
+        ).read_text(encoding="utf-8")
+        body = src.split("def replace_shader", 1)[1].split("def remove_shader_replacement", 1)[0]
+        invoke_at = body.find("self._invoke(callback)")
+        register_at = body.find("RegisterReplacement")
+        self.assertGreater(invoke_at, 0)
+        self.assertGreater(register_at, invoke_at)
+
+    def test_parse_resource_id_does_not_assign_private_id(self):
+        src = (ROOT / "renderdoc_extension" / "utils" / "parsers.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("rid.id =", src)
+        self.assertIn("resolve_live", src)
 
     def test_stats_never_scan_texture_bytes(self):
         src = (

@@ -9,6 +9,8 @@ import renderdoc as rd
 
 from ..utils import Parsers
 from ..utils.export_opts import FILE_TYPE_ENUM, normalize_file_type, resolve_export_path
+from ..utils.resource_id import ids_equal
+from ..utils.rid_cache import remember, resolve_live
 from ..utils.mesh_obj import mesh_to_obj
 
 
@@ -22,9 +24,22 @@ class ExportService:
         name = FILE_TYPE_ENUM[key]
         return getattr(rd.FileType, name), key
 
-    def _texture_save(self, resource_id, dest_enum, mip, slice_idx, sample):
+    def _resolve_texture_id(self, controller, resource_id):
+        rid = resolve_live(controller, self.ctx, resource_id)
+        if rid is not None:
+            return rid
+        for tex in controller.GetTextures() or []:
+            remember(tex.resourceId)
+            if ids_equal(tex.resourceId, resource_id):
+                return tex.resourceId
+        return None
+
+    def _texture_save(self, controller, resource_id, dest_enum, mip, slice_idx, sample):
+        rid = self._resolve_texture_id(controller, resource_id)
+        if rid is None:
+            raise ValueError("Texture not found: %s" % resource_id)
         s = rd.TextureSave()
-        s.resourceId = Parsers.parse_resource_id(resource_id)
+        s.resourceId = rid
         s.destType = dest_enum
         s.mip = int(mip)
         try:
@@ -61,7 +76,13 @@ class ExportService:
         result = {"data": None, "error": None}
 
         def callback(controller):
-            saver = self._texture_save(resource_id, dest_enum, mip, slice_idx, sample)
+            try:
+                saver = self._texture_save(
+                    controller, resource_id, dest_enum, mip, slice_idx, sample
+                )
+            except Exception as e:
+                result["error"] = str(e)
+                return
             try:
                 details = controller.SaveTexture(saver, out_path)
             except Exception as e:
@@ -112,7 +133,7 @@ class ExportService:
             outs = list(getattr(action, "outputs", []) or [])
             idx = int(target_index or 0)
             if 0 <= idx < len(outs) and outs[idx] != rd.ResourceId.Null():
-                rid = outs[idx]
+                rid = remember(outs[idx])
         if rid is None:
             raise ValueError("No color target %s at event %s" % (target_index, event_id))
         return self.export_texture(
@@ -134,9 +155,19 @@ class ExportService:
             event_id = getattr(walk, "eventId", None)
             for output in getattr(walk, "outputs", []) or []:
                 if output != rd.ResourceId.Null():
-                    rid = output
+                    rid = remember(output)
                     break
             walk = getattr(walk, "previous", None)
+        if rid is None:
+            try:
+                pipe = self.ctx.CurPipelineState()
+                for desc in pipe.GetOutputTargets() or []:
+                    output = getattr(desc, "resource", None) or getattr(desc, "resourceId", None)
+                    if output is not None and output != rd.ResourceId.Null():
+                        rid = remember(output)
+                        break
+            except Exception:
+                rid = None
         if rid is None:
             raise ValueError("No color output found for thumbnail")
         data = self.export_texture(str(rid), path=path, dest_type=dest_type)
@@ -155,16 +186,16 @@ class ExportService:
         result = {"data": None, "error": None}
 
         def callback(controller):
-            try:
-                rid = Parsers.parse_resource_id(resource_id)
-            except Exception:
-                result["error"] = "Invalid resource ID: %s" % resource_id
-                return
             buf_desc = None
             for buf in controller.GetBuffers() or []:
-                if buf.resourceId == rid:
+                remember(buf.resourceId)
+                if ids_equal(buf.resourceId, resource_id):
                     buf_desc = buf
                     break
+            if buf_desc is not None:
+                rid = buf_desc.resourceId
+            else:
+                rid = None
             if buf_desc is None:
                 result["error"] = "Buffer not found: %s" % resource_id
                 return

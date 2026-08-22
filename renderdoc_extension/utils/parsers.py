@@ -4,6 +4,9 @@ Parse utility functions for RenderDoc data types.
 
 import renderdoc as rd
 
+from .resource_id import numeric_id
+from .rid_cache import resolve_live, remember, lookup_cached
+
 
 class Parsers:
     """Parse utility functions (static methods)"""
@@ -25,20 +28,29 @@ class Parsers:
         return stage_map[stage_lower]
 
     @staticmethod
-    def parse_resource_id(resource_id_str):
-        """Parse resource ID string to ResourceId object"""
-        # Handle formats like "ResourceId::123" or just "123"
-        rid = rd.ResourceId()
-        if "::" in resource_id_str:
-            id_part = resource_id_str.split("::")[-1]
-        else:
-            id_part = resource_id_str
-        rid.id = int(id_part)
+    def parse_resource_id(resource_id_str, controller=None, ctx=None):
+        """Return a *live* ResourceId. Never forge one via ResourceId().id.
+
+        C++ ResourceId.id is private; assigning it from Python leaves Null
+        (ResourceId::0). Resolve against cache + GetTextures/GetBuffers/GetResources.
+        """
+        rid = resolve_live(controller, ctx, resource_id_str)
+        if rid is None:
+            raise ValueError(
+                "Resource not found: %s (cannot construct ResourceId; id is private)"
+                % resource_id_str
+            )
         return rid
 
     @staticmethod
     def extract_numeric_id(resource_id_str):
         """Extract numeric ID from resource ID string"""
-        if "::" in resource_id_str:
-            return int(resource_id_str.split("::")[-1])
-        return int(resource_id_str)
+        return numeric_id(resource_id_str)
+
+    @staticmethod
+    def remember_resource_id(rid):
+        return remember(rid)
+
+    @staticmethod
+    def lookup_cached_resource_id(resource_id_str):
+        return lookup_cached(resource_id_str)
