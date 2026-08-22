@@ -174,3 +174,13 @@ Product loop, ResourceId lookup, GetCaptureFile/ReplayManager, and encoding name
 - `tests/test_cache.py` — GPU-free unit tests (154 total suite).
 - `docs/openviking-cache-design.md` — design + self-critique.
 - `README.md` / `AGENTS.md` — cache documentation.
+
+---
+
+## Zhihu column pack (2026-08-23)
+
+> Rewrite the live-proven RenderDoc MCP design as a Zhihu 专栏 paste pack (`tech-design-to-zhihu`). `zhihu-cli` can only read 本人创作, not publish.
+
+| Me | You |
+|---|---|
+| Use `~\.kilo\skills\tech-design-to-zhihu\` to update the Zhihu article, and push. | Two paste packs (知乎 CLI 只能读本人创作，不能发文)。(1) `docs/openviking-cache-design-zhihu/` — 缓存放 MCP 侧，键带捕获身份，失效先于命中率。(2) `docs/renderdoc-mcp-zhihu/` — 产品是像素变了，不是五十个工具；3.6/3.10 拆分、活 ResourceId、UI 登记在 BlockInvoke 外。 |
