@@ -355,6 +355,15 @@ class TestReplaceResourceNote(unittest.TestCase):
         self.assertGreater(invoke_at, 0)
         self.assertGreater(register_at, invoke_at)
 
+    def test_export_capture_does_not_pass_listing_dict(self):
+        src = (
+            ROOT / "renderdoc_extension" / "services" / "capture_manager.py"
+        ).read_text(encoding="utf-8")
+        body = src.split("def convert_capture", 1)[1]
+        self.assertNotIn("fmt = item", body)
+        self.assertIn("_find_capture_format", src)
+        self.assertIn("ExportCapture(fmt, filename)", body)
+
     def test_parse_resource_id_does_not_assign_private_id(self):
         src = (ROOT / "renderdoc_extension" / "utils" / "parsers.py").read_text(
             encoding="utf-8"

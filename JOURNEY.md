@@ -150,3 +150,27 @@ Product loop, ResourceId lookup, GetCaptureFile/ReplayManager, and encoding name
 | Me | You |
 |---|---|
 | Idle continuation: do not declare the hang-fix done until `compile_shader → replace_shader → replay_event → pick_pixel` changes a real pixel. | Reinstalled extension, relaunched `qrenderdoc` on `frame480`. Pre-pixel `[0.011,0.011,0.011,0.945]` → compile `…297` → replace (`ui_registered: true`) → `replay_event(550)` `{replayed:true}` → post-pixel `[1,0,1,1]`. Restore returned the original pixel. `get_resource(::56/::125)`, `get_buffer_contents(::125)`, `export_texture(::56)` (3523-byte PNG), `list_sections` (122 MB framecapture), `embed_dependencies`, `write_section`, encodings `["GLSL"]` all live. `debug_pixel` unavailable (no GL debug info). 135/135 tests. |
+| Independent re-check of live state (do not re-apply magenta). | Restore still held at original pixel. `list_sections` is **3** (framecapture + `embeddedexternalfiles` + `renderdoc/ui/notes`) — the write tools persisted. Encodings `["GLSL"]`, PNG 3523 B, hang-fix still in installed copy. Report updated. `convert_capture` fallback no longer passes a dict into `ExportCapture` (needs a live `CaptureFileFormat`). Unused `Parsers` imports dropped from export/pixel services. |
+| Retest: reinstall + restart + re-apply magenta. | 136/136 tests. Product loop reproduced: `[0.011…]` → `…297` → `{replayed:true}` → `[1,0,1,1]` → restore. `convert_capture` xml wrote 1 081 556 B (`<driver id="2">OpenGL</driver>`). `mesh_to_obj` still unused. |
+
+---
+
+## OpenViking-backed response cache (2026-08-23)
+
+> Task: (1) how can `OpenViking` be useful for caching `renderdoc`; (2) draft plan, self-critic, improve; (3) execute; (4) push.
+
+| Me | You |
+|---|---|
+| `/goal` for caching `D:\GitRepo-AI\renderdoc` with the OpenViking repo, then plan/self-critic/execute/push. | Read both repos. OpenViking contributes two layers: the lightweight `openviking_sdk.SyncHTTPClient` (persistent `viking://` FS) and RAGFS `CachedFileSystem` (read-through native/Redis/Mooncake cache). RenderDoc MCP has ~60 bridge-backed tools and zero response caching, so every repeated read pays file-IPC + GPU/replay cost. |
+| — | Drafted `docs/openviking-cache-design.md`: capture-scoped, read-through cache on the MCP side; memory default, optional OpenViking backend; key = capture identity + method + canonical params; mutations invalidate; queue-draining/exports/debuggers bypass. |
+| Self-critic (before code) | 9 risks addressed up front: cross-capture key collision (stat-scoped identity), stale reads after `replace_*` (invalidate on mutation), `get_debug_messages` queue drain (bypass), scope recursion (status bypass-only), SDK absence (lazy import + fallback), semantic-processing waste (`vectors_only` + `read_raw`), oversized entries (4 MiB cap), GPU-free tests (fake bridge), concurrency (locked memory backend). |
+| — | Implemented `mcp_server/cache.py` (`MemoryBackend`, `OpenVikingBackend`, `ResponseCache`), wired `config.py` + `server.py` (`RENDERDOC_MCP_CACHE*` env), added `tests/test_cache.py`. |
+| Test pass | 154/154 green (`py -3.13 -m unittest discover -s tests`). Caught and fixed two issues during implementation: removed capture-scope memoization (stale key after capture change), and made `OpenVikingBackend.clear()` reset its ready flag so a subsequent `put` re-mkdirs the base. |
+
+### Deliverables
+
+- `mcp_server/cache.py` — read-through `ResponseCache` + memory/OpenViking backends.
+- `mcp_server/config.py` / `mcp_server/server.py` — cache wiring and env config.
+- `tests/test_cache.py` — GPU-free unit tests (154 total suite).
+- `docs/openviking-cache-design.md` — design + self-critique.
+- `README.md` / `AGENTS.md` — cache documentation.

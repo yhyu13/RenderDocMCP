@@ -272,6 +272,41 @@ class CaptureManager:
             })
         return {"count": len(formats), "formats": formats}
 
+    def _find_capture_format(self, want):
+        """Return a live CaptureFileFormat whose extension matches `want`."""
+        items = None
+        cap = None
+        try:
+            cap = self._capture_file()
+        except Exception:
+            cap = None
+        if cap is not None:
+            getter = getattr(cap, "GetCaptureFileFormats", None)
+            if getter is not None:
+                try:
+                    items = getter()
+                except Exception:
+                    items = None
+        tmp = None
+        if items is None:
+            try:
+                tmp = rd.OpenCaptureFile()
+                items = tmp.GetCaptureFileFormats()
+            except Exception:
+                items = None
+        found = None
+        for item in items or []:
+            ext = (getattr(item, "extension", "") or "").lower().lstrip(".")
+            if ext == want:
+                found = item
+                break
+        if tmp is not None:
+            try:
+                tmp.Shutdown()
+            except Exception:
+                pass
+        return found
+
     def convert_capture(self, filename, filetype="rdc"):
         """Export/convert the open capture to another representation on disk."""
         if not filename:
@@ -287,14 +322,10 @@ class CaptureManager:
                 details = cap.Convert(filename, filetype or "rdc", None)
             self._result_details(details, "Convert")
         else:
-            fmt = None
-            listing = self.list_capture_formats()
-            want = (filetype or "rdc").lower()
-            for item in listing.get("formats") or []:
-                ext = (item.get("extension") or "").lower()
-                if ext == want or ext == want.lstrip("."):
-                    fmt = item
-                    break
+            want = (filetype or "rdc").lower().lstrip(".")
+            fmt = self._find_capture_format(want)
+            if fmt is None:
+                raise ValueError("unknown capture filetype: %s" % filetype)
             try:
                 self.ctx.ExportCapture(fmt, filename)
             except Exception as e:

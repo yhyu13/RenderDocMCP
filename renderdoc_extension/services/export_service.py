@@ -7,7 +7,6 @@ import os
 
 import renderdoc as rd
 
-from ..utils import Parsers
 from ..utils.export_opts import FILE_TYPE_ENUM, normalize_file_type, resolve_export_path
 from ..utils.resource_id import ids_equal
 from ..utils.rid_cache import remember, resolve_live

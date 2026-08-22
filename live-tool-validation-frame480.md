@@ -1,6 +1,6 @@
 # RenderDoc MCP — Live Tool Validation Report (re-run)
 
-**Date:** 2026-08-23 · **Capture:** `D:\GitRepo-My\radiance-cascades-demo\3d\tools\captures\rdoc_frame_frame480.rdc` (OpenGL, 40 actions, 1280×720) · **RenderDoc:** v1.45 · **MCP:** `renderdoc-mcp` v1.0.0 via Kilo · **Tests:** `py -3.13 -m unittest discover -s tests` → **135/135**
+**Date:** 2026-08-23 · **Capture:** `D:\GitRepo-My\radiance-cascades-demo\3d\tools\captures\rdoc_frame_frame480.rdc` (OpenGL, 40 actions, 1280×720) · **RenderDoc:** v1.45 · **MCP:** `renderdoc-mcp` v1.0.0 via Kilo · **Tests:** `py -3.13 -m unittest discover -s tests` → **136/136**
 
 This is the post-fix re-run. The first live pass (same capture) had 9 broken / 7 degraded tools and a shader-edit loop that did not apply (`ResourceId::0`). The second live pass proved ResourceId resolution and GetCaptureFile, then hung on `replay_event` after a real replacement. This third pass reinstalled the hang-fix and re-ran the product loop against a live GPU.
 
@@ -10,10 +10,10 @@ This is the post-fix re-run. The first live pass (same capture) had 9 broken / 7
 |---|---|
 | Product loop (`compile_shader` → `replace_shader` → `replay_event` → `pick_pixel`) | **PASS** — magenta replacement applied, original restored |
 | ResourceId resolution (`get_resource` / `get_buffer_contents` / `export_texture` on `::56`/`::125`) | **PASS** |
-| Capture-file access (`list_sections` / `embed_dependencies` / `write_section` / `list_capture_formats`) | **PASS** (framecapture refuse is by design) |
+| Capture-file access (`list_sections` / `embed_dependencies` / `write_section` / `list_capture_formats` / `convert_capture`) | **PASS** (framecapture refuse is by design; XML convert wrote 1 081 556 B) |
 | Encoding names (`list_shader_encodings`) | **PASS** — `["GLSL"]`, not `"2"` |
 | Shader step-debug (`debug_pixel`) | **UNAVAILABLE** — OpenGL capture has no debug info / API does not support it |
-| Unit tests | **135/135** |
+| Unit tests | **136/136** |
 
 ## Product loop (the original success criterion)
 
@@ -44,10 +44,10 @@ Replacement source kept the original ins/outs/uniforms and overwrote `finalColor
 | `get_resource` | `ResourceId::125` | Buffer 125, `length: 48` |
 | `get_buffer_contents` | `ResourceId::125` offset 0 length 64 | 48 bytes, `content_base64` starts `AACAvwAAgL8AAIA/` |
 | `export_texture` | `ResourceId::56` png | `C:\Users\XINDONG\AppData\Local\Temp\renderdoc_mcp\exports\tex_ResourceId__56.png` (3523 bytes, 128×128) |
-| `list_sections` | — | 1 section: `renderdoc/internal/framecapture`, 122 478 912 bytes |
-| `get_section` | index 0 | **refused** (`[-32602] section too large … cap 4194304`) — designed, not a regression |
-| `embed_dependencies` | — | `{success: true, embedded: true}` |
-| `write_section` | notes / `mcp-live-validation-2026-08-22` | `{name: notes, type: Notes, bytes: 30}` |
+| `list_sections` | — | **3** sections after the write tools ran (was 1 before them): `framecapture` 122 478 912 B; `embeddedexternalfiles` (from `embed_dependencies`); `renderdoc/ui/notes` 30 B (from `write_section`). Those writes persisted in the open capture. |
+| `get_section` | index 0 (framecapture) | **refused** (`[-32602] section too large … cap 4194304`) — designed, not a regression. The 30 B notes section is under the cap. |
+| `embed_dependencies` | — | `{success: true, embedded: true}` — survived as `embeddedexternalfiles` |
+| `write_section` | notes / `mcp-live-validation-2026-08-22` | `{name: notes, type: Notes, bytes: 30}` — survived as `renderdoc/ui/notes` |
 | `list_capture_formats` | — | rdc / chrome.json / xml / zip.xml |
 | `list_shader_encodings` | — | `target: ["GLSL"], custom: ["GLSL"]` |
 
@@ -91,7 +91,11 @@ The original destination was: in-capture read/write/modify at the RenderDoc API 
 - Plugin is installed and auto-loads.
 - Product loop is proven on `frame480` with before/after pixel evidence.
 - Previously broken ResourceId and GetCaptureFile paths are proven.
-- Unit tests 135/135.
+- Unit tests 136/136.
 - This file is the durable report.
+
+Independent re-check (2026-08-23, same loaded capture, no second magenta apply): restore still held at `[0.010986328125, 0.010986328125, 0.010986328125, 0.9450980424880981]`; encodings still `["GLSL"]`; export PNG still 3523 bytes; `list_sections` now 3 (writes persisted). Hang-fix still in the installed copy (`RegisterReplacement` after `_invoke`). Magenta transition was not re-applied in that pass.
+
+Independent **retest** (2026-08-23 later, extension reinstalled with `_find_capture_format`, qrenderdoc restarted): magenta **was** re-applied. Pre `[0.010986328125 ×3, 0.9450980424880981]` → compile `ResourceId::1000000000000000297` → replace `ui_registered: true` → `replay_event(550)` `{replayed:true}` → post `[1.0, 0.0, 1.0, 1.0]` → restore back to original. `convert_capture(..., xml)` wrote `frame480_retest.xml` (1 081 556 B, header `<driver id="2">OpenGL</driver>`). `get_resource(::56/::125)`, `get_buffer_contents(::125)`, PNG 3523 B, encodings `["GLSL"]` still live. `mesh_to_obj` import in `export_service.py` remains unused.
 
 Not claimed: `debug_pixel` on OpenGL without debug info; injecting texture/buffer bytes; editing non-shader pipeline state.

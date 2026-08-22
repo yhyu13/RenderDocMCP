@@ -5,8 +5,6 @@ Python 3.6 / stdlib only. ReplayController access via BlockInvoke.
 
 import renderdoc as rd
 
-from ..utils import Parsers
-
 
 class PixelService:
     """Pick a pixel and retrieve its modification history."""
