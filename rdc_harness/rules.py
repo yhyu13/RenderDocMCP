@@ -74,6 +74,14 @@ def _result(rule: str, severity: Severity, ok: bool, message: str,
     )
 
 
+def _skip(rule_name: str) -> CheckResult:
+    """Emit a SKIP check for a rule whose required data was absent."""
+    return CheckResult(
+        rule=rule_name, status=CheckStatus.SKIP, severity=Severity.LOW,
+        message=f"no data for rule '{rule_name}'",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Individual rules (each: (Thresholds, ctx) -> CheckResult | None)
 # ---------------------------------------------------------------------------
@@ -361,6 +369,90 @@ def check_binding_completeness(pipeline: Mapping[str, Any]) -> Optional[CheckRes
                    "all shader stages have bindings", expected="ok", actual="ok")
 
 
+def check_invisible_pipeline(pipeline: Mapping[str, Any]) -> list[CheckResult]:
+    """Matias "nothing rendered" checks on rasterizer / depth / blend / viewport.
+
+    Zero model cost. Failures are the usual human causes of an invisible draw:
+    ColorWriteMask 0, zero viewport, FrontAndBack cull, empty scissor.
+
+    Empty pipeline → no checks. Pipeline present but none of the inspectable
+    fields (cull / viewport / enabled scissor / blend targets) were actually
+    read → SKIP, never a false PASS.
+    """
+    if not isinstance(pipeline, Mapping) or not pipeline:
+        return []
+    results: list[CheckResult] = []
+    inspected_fields: list[str] = []
+
+    raster = pipeline.get("rasterizer")
+    if isinstance(raster, Mapping):
+        cull = str(raster.get("cull_mode") or "")
+        if cull:
+            inspected_fields.append("cull")
+            if "FrontAndBack" in cull:
+                results.append(_result(
+                    "cull_all", Severity.HIGH, False,
+                    "rasterizer culls front and back faces",
+                    expected="not FrontAndBack", actual=cull,
+                ))
+        vp = raster.get("viewport")
+        if isinstance(vp, Mapping):
+            w = _num(vp.get("width"))
+            h = _num(vp.get("height"))
+            if w is not None and h is not None:
+                inspected_fields.append("viewport")
+                if w <= 0 or h <= 0:
+                    results.append(_result(
+                        "viewport_empty", Severity.HIGH, False,
+                        "viewport has zero size",
+                        expected="width>0 and height>0", actual={"width": w, "height": h},
+                    ))
+        sc = raster.get("scissor")
+        if isinstance(sc, Mapping) and sc.get("enabled"):
+            sw = _num(sc.get("width"))
+            sh = _num(sc.get("height"))
+            if sw is not None and sh is not None:
+                inspected_fields.append("scissor")
+                if sw <= 0 or sh <= 0:
+                    results.append(_result(
+                        "scissor_empty", Severity.HIGH, False,
+                        "scissor is enabled with zero size",
+                        expected="width>0 and height>0", actual={"width": sw, "height": sh},
+                    ))
+
+    blend = pipeline.get("blend")
+    if isinstance(blend, Mapping):
+        targets = blend.get("targets")
+        if isinstance(targets, list) and targets:
+            masked = []
+            known = 0
+            for t in targets:
+                if not isinstance(t, Mapping) or "write_mask" not in t:
+                    continue
+                known += 1
+                if int(t.get("write_mask") or 0) == 0:
+                    masked.append(t.get("index"))
+            if known == len(targets):
+                inspected_fields.append("write_mask")
+                if masked and len(masked) == known:
+                    results.append(_result(
+                        "color_write_disabled", Severity.HIGH, False,
+                        "all color targets have write_mask 0",
+                        expected="write_mask != 0", actual=masked,
+                    ))
+
+    if results:
+        return results
+    if inspected_fields:
+        results.append(_result(
+            "invisible_pipeline", Severity.MEDIUM, True,
+            "no obvious invisible-draw pipeline flags",
+            expected="%s sane" % "/".join(inspected_fields), actual="ok",
+        ))
+        return results
+    return [_skip("invisible_pipeline")]
+
+
 # ---------------------------------------------------------------------------
 # Engine entry points
 # ---------------------------------------------------------------------------
@@ -393,14 +485,6 @@ _FRAME_RULES = (
     ("bandwidth", rule_bandwidth),
     ("batching", rule_batching),
 )
-
-
-def _skip(rule_name: str) -> CheckResult:
-    """Emit a SKIP check for a rule whose required data was absent."""
-    return CheckResult(
-        rule=rule_name, status=CheckStatus.SKIP, severity=Severity.LOW,
-        message=f"no data for rule '{rule_name}'",
-    )
 
 
 def run_deterministic(
@@ -437,6 +521,7 @@ def run_deterministic(
         result = check_binding_completeness(pipeline)
         if result is not None:
             checks.append(result)
+        checks.extend(check_invisible_pipeline(pipeline))
 
     result = check_validation_messages(debug_messages)
     if result is not None:

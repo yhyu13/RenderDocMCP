@@ -37,6 +37,7 @@ class RenderDocShaderBackend(ShaderBackend):
           ``get_shader_source`` when omitted.
         - ``golden_bytes`` / ``render_target``: the L2 baseline image bytes and
           the render-target resource id to diff against after replay.
+        - ``compile_flags``: forwarded to ``compile_shader`` ("default" or "debug").
     """
 
     def __init__(
@@ -47,6 +48,7 @@ class RenderDocShaderBackend(ShaderBackend):
         entry: Optional[str] = None,
         golden_bytes: Optional[bytes] = None,
         render_target: Optional[str] = None,
+        compile_flags: str = "default",
     ):
         self._controller = controller
         self._bridge = bridge
@@ -54,6 +56,7 @@ class RenderDocShaderBackend(ShaderBackend):
         self._entry = entry
         self._golden_bytes = golden_bytes
         self._render_target = render_target
+        self._compile_flags = compile_flags
 
     def _call(self, method: str, params: Optional[dict[str, Any]] = None) -> Any:
         if self._bridge is None:
@@ -84,7 +87,13 @@ class RenderDocShaderBackend(ShaderBackend):
     def compile_shader(self, hlsl: str, stage: str) -> str:
         entry = self._discover_entry(stage)
         result = self._call(
-            "compile_shader", {"hlsl": hlsl, "stage": stage, "entry": entry}
+            "compile_shader",
+            {
+                "hlsl": hlsl,
+                "stage": stage,
+                "entry": entry,
+                "compile_flags": self._compile_flags,
+            },
         )
         if not result.get("resource_id"):
             raise ShaderCompileError(result.get("messages") or "compile failed")

@@ -18,6 +18,7 @@ import base64
 import renderdoc as rd
 
 from ..utils import Parsers
+from ..utils.compile_opts import resolve_compile_flags
 
 
 class ShaderEditService:
@@ -43,16 +44,27 @@ class ShaderEditService:
         return encoding_map[key]
 
     @staticmethod
-    def _compile_flags():
-        """Return default compile flags for BuildTargetShader.
+    def _compile_flags(compile_flags=None):
+        """Build a ShaderCompileFlags object from a preset name or pair list.
 
-        ShaderCompileFlags is a struct of name/value pairs in the Python
-        bindings; an empty instance means "use default compile flags".
+        ShaderCompileFlags is a struct of name/value pairs; an empty instance
+        means "use default compile flags". The 'debug' preset sets
+        D3DCOMPILE_DEBUG + D3DCOMPILE_SKIP_OPTIMIZATION (ignored on other APIs).
         """
+        pairs = resolve_compile_flags(compile_flags)
         try:
-            return rd.ShaderCompileFlags()
+            flags = rd.ShaderCompileFlags()
         except Exception:
             return 0
+        for pair in pairs:
+            try:
+                item = rd.ShaderCompileFlag()
+                item.name = pair["name"]
+                item.value = pair["value"]
+                flags.flags.append(item)
+            except Exception:
+                continue
+        return flags
 
     def get_shader_source(self, event_id, stage):
         """Get the original source (or raw bytes) of the shader at event/stage."""
@@ -118,7 +130,7 @@ class ShaderEditService:
             stage_enum = Parsers.parse_stage(stage)
             enc = self._parse_encoding(encoding)
             source_bytes = hlsl.encode("utf-8")
-            flags = compile_flags if compile_flags is not None else self._compile_flags()
+            flags = self._compile_flags(compile_flags)
 
             shader_id, messages = controller.BuildTargetShader(
                 entry, enc, source_bytes, flags, stage_enum
@@ -132,6 +144,7 @@ class ShaderEditService:
                 "entry_point": entry,
                 "stage": stage,
                 "messages": messages or "",
+                "compile_flags": resolve_compile_flags(compile_flags),
             }
 
         self._invoke(callback)
@@ -248,3 +261,217 @@ class ShaderEditService:
         self._invoke(callback)
         result["count"] = len(result["messages"])
         return result
+
+    def list_shader_encodings(self):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        out = {"target": [], "custom": []}
+        try:
+            for enc in self.ctx.CustomShaderEncodings() or []:
+                out["custom"].append(str(enc))
+        except Exception:
+            pass
+
+        def callback(controller):
+            try:
+                encs = controller.GetTargetShaderEncodings()
+            except Exception:
+                encs = None
+            if encs is None:
+                try:
+                    encs = controller.GetCustomShaderEncodings()
+                except Exception:
+                    encs = []
+            for enc in encs or []:
+                out["target"].append(str(enc))
+
+        self._invoke(callback)
+        return out
+
+    def list_shaders(self, stage=None, limit=200):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        if limit is None or int(limit) <= 0:
+            limit = 200
+        limit = min(int(limit), 2000)
+        stage_filter = (stage or "").lower()
+        seen = {}
+        result = {"error": None}
+
+        def callback(controller):
+            try:
+                from ..utils.helpers import Helpers
+                roots = controller.GetRootActions()
+                actions = Helpers.flatten_actions(roots)
+                stages = Helpers.get_all_shader_stages()
+            except Exception as e:
+                result["error"] = str(e)
+                return
+            for action in actions:
+                flags = getattr(action, "flags", 0)
+                draw_flags = rd.ActionFlags.Drawcall | rd.ActionFlags.Dispatch
+                try:
+                    draw_flags = draw_flags | rd.ActionFlags.MeshDispatch
+                except Exception:
+                    pass
+                if not (flags & draw_flags):
+                    continue
+                try:
+                    controller.SetFrameEvent(action.eventId, False)
+                    pipe = controller.GetPipelineState()
+                except Exception:
+                    continue
+                for st in stages:
+                    st_name = str(st).split(".")[-1].lower()
+                    if stage_filter and stage_filter not in st_name:
+                        continue
+                    try:
+                        sid = pipe.GetShader(st)
+                    except Exception:
+                        continue
+                    if sid == rd.ResourceId.Null():
+                        continue
+                    key = str(sid)
+                    if key in seen:
+                        seen[key]["event_ids"].append(action.eventId)
+                        continue
+                    entry = ""
+                    try:
+                        entry = pipe.GetShaderEntryPoint(st) or ""
+                    except Exception:
+                        entry = ""
+                    seen[key] = {
+                        "resource_id": key,
+                        "stage": st_name,
+                        "entry_point": entry,
+                        "event_ids": [action.eventId],
+                    }
+
+        self._invoke(callback)
+        if result["error"]:
+            raise ValueError(result["error"])
+        items = list(seen.values())
+        return {
+            "count": len(items),
+            "returned": min(len(items), limit),
+            "truncated": len(items) > limit,
+            "shaders": items[:limit],
+        }
+
+    def shader_map(self, limit=200):
+        listing = self.list_shaders(limit=limit)
+        rows = []
+        for s in listing.get("shaders") or []:
+            for eid in s.get("event_ids") or []:
+                rows.append({
+                    "event_id": eid,
+                    "stage": s.get("stage"),
+                    "resource_id": s.get("resource_id"),
+                    "entry_point": s.get("entry_point"),
+                })
+        rows.sort(key=lambda r: (r["event_id"], r["stage"] or ""))
+        truncated = len(rows) > limit
+        return {
+            "count": len(rows),
+            "returned": min(len(rows), limit),
+            "truncated": truncated,
+            "map": rows[:limit],
+        }
+
+    def search_shaders(self, pattern, stage=None, limit=50):
+        if not pattern:
+            raise ValueError("pattern is required")
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        if limit is None or int(limit) <= 0:
+            limit = 50
+        limit = min(int(limit), 200)
+        needle = pattern.lower()
+        matches = []
+        listing = self.list_shaders(stage=stage, limit=500)
+        result = {"error": None}
+
+        def callback(controller):
+            from ..utils.helpers import Helpers
+            stages = Helpers.get_all_shader_stages()
+            seen_ids = set()
+            for s in listing.get("shaders") or []:
+                if len(matches) >= limit:
+                    return
+                sid = s.get("resource_id")
+                if sid in seen_ids:
+                    continue
+                seen_ids.add(sid)
+                eids = s.get("event_ids") or []
+                if not eids:
+                    continue
+                try:
+                    controller.SetFrameEvent(int(eids[0]), False)
+                    pipe = controller.GetPipelineState()
+                    reflection = None
+                    stage_enum = None
+                    for st in stages:
+                        if pipe.GetShader(st) != rd.ResourceId.Null() and str(pipe.GetShader(st)) == sid:
+                            stage_enum = st
+                            reflection = pipe.GetShaderReflection(st)
+                            break
+                    if reflection is None:
+                        continue
+                    targets = controller.GetDisassemblyTargets(True) or []
+                    if not targets:
+                        continue
+                    pipe_obj = pipe.GetGraphicsPipelineObject()
+                    disasm = controller.DisassembleShader(pipe_obj, reflection, targets[0]) or ""
+                except Exception:
+                    continue
+                low = disasm.lower()
+                idx = low.find(needle)
+                if idx < 0:
+                    continue
+                start = max(0, idx - 80)
+                end = min(len(disasm), idx + 80)
+                matches.append({
+                    "resource_id": sid,
+                    "stage": s.get("stage"),
+                    "entry_point": s.get("entry_point"),
+                    "event_id": eids[0],
+                    "snippet": disasm[start:end],
+                })
+
+        self._invoke(callback)
+        if result["error"]:
+            raise ValueError(result["error"])
+        return {"pattern": pattern, "count": len(matches), "matches": matches}
+
+    def compile_custom_shader(self, source, stage, entry, encoding="hlsl"):
+        """BuildCustomShader — visualization shader, not a target replacement."""
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        result = {"compiled": None, "error": None}
+
+        def callback(controller):
+            stage_enum = Parsers.parse_stage(stage)
+            enc = self._parse_encoding(encoding)
+            flags = self._compile_flags()
+            try:
+                shader_id, messages = controller.BuildCustomShader(
+                    entry, enc, source.encode("utf-8"), flags, stage_enum
+                )
+            except Exception as e:
+                result["error"] = "BuildCustomShader failed: %s" % str(e)
+                return
+            if shader_id == rd.ResourceId.Null():
+                result["error"] = "Custom shader compile failed: %s" % (messages or "no messages")
+                return
+            result["compiled"] = {
+                "resource_id": str(shader_id),
+                "entry_point": entry,
+                "stage": stage,
+                "messages": messages or "",
+                "custom": True,
+            }
+
+        self._invoke(callback)
+        if result["error"]:
+            raise ValueError(result["error"])
+        return result["compiled"]

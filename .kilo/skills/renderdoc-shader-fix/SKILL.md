@@ -50,7 +50,7 @@ The real RenderDoc adapter is `RenderDocShaderBackend`; the loop itself is unit-
    - Prefer minimal changes; do not change constant-buffer layouts.
 
 3. **Compile**
-   - `compile_shader(hlsl=source, stage=stage, entry=entry, encoding=encoding)`
+   - `compile_shader(hlsl=source, stage=stage, entry=entry, encoding=encoding, compile_flags="debug")` when you need `debug_pixel` symbols.
    - Inspect compiler messages on failure.
 
 4. **Replace and replay**
@@ -80,6 +80,6 @@ The real RenderDoc adapter is `RenderDocShaderBackend`; the loop itself is unit-
 
 - Always run L1 before L2; L1 is zero model cost and catches non-shader regressions early.
 - Keep `original_hlsl` unchanged as the patcher baseline; feed L2 reports into the patcher.
-- Record the final `source`, `score`, and `history` in a before/after report (`report.py`).
+   - Record the final `source`, `score`, and `history` in a before/after report (`report.py`). Write the engine-side patch with `write_shader_patch` / `artifacts_from_fix_report`.
 - Remove shader replacements when the session ends unless you explicitly want to persist them.
 - On WebGPU/D3D12 captures, remember the editable source is HLSL, not WGSL.

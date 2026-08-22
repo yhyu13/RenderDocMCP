@@ -11,6 +11,11 @@ from .services import (
     ResourceService,
     PipelineService,
     ShaderEditService,
+    PixelService,
+    MeshService,
+    ExportService,
+    DebugService,
+    AnalysisService,
 )
 
 
@@ -42,6 +47,11 @@ class RenderDocFacade:
         self._resource = ResourceService(ctx, self._invoke)
         self._pipeline = PipelineService(ctx, self._invoke)
         self._shader_edit = ShaderEditService(ctx, self._invoke)
+        self._pixel = PixelService(ctx, self._invoke)
+        self._mesh = MeshService(ctx, self._invoke)
+        self._export = ExportService(ctx, self._invoke)
+        self._debug = DebugService(ctx, self._invoke)
+        self._analysis = AnalysisService(ctx, self._invoke)
 
     def _invoke(self, callback):
         """Invoke callback on replay thread via BlockInvoke"""
@@ -72,6 +82,7 @@ class RenderDocFacade:
         event_id_max=None,
         only_actions=False,
         flags_filter=None,
+        preset=None,
     ):
         """Get all draw calls/actions in the capture with optional filtering"""
         return self._action.get_draw_calls(
@@ -82,6 +93,7 @@ class RenderDocFacade:
             event_id_max=event_id_max,
             only_actions=only_actions,
             flags_filter=flags_filter,
+            preset=preset,
         )
 
     def get_frame_summary(self):
@@ -163,3 +175,117 @@ class RenderDocFacade:
     def get_debug_messages(self):
         """Retrieve newly generated diagnostic/validation messages"""
         return self._shader_edit.get_debug_messages()
+
+    # ==================== Pixel / Mesh (human 90% toolkit) ====================
+
+    def pick_pixel(self, event_id, x, y, resource_id=None, mip=0, slice_idx=0, sample=0):
+        """Pick the numeric value of one pixel (Texture Viewer right-click)."""
+        return self._pixel.pick_pixel(event_id, x, y, resource_id, mip, slice_idx, sample)
+
+    def get_pixel_history(
+        self, event_id, x, y, resource_id=None, mip=0, slice_idx=0, sample=0, max_events=32
+    ):
+        """Who wrote this pixel (green pass / red test-fail)."""
+        return self._pixel.get_pixel_history(
+            event_id, x, y, resource_id, mip, slice_idx, sample, max_events
+        )
+
+    def get_mesh_data(self, event_id, max_vertices=8):
+        """Sample mesh VSIn vs VSOut (Mesh Viewer input/output)."""
+        return self._mesh.get_mesh_data(event_id, max_vertices)
+
+    def get_resource_usage(self, resource_id):
+        """Events that read/write this resource (timeline strip)."""
+        return self._resource.get_resource_usage(resource_id)
+
+    def close_capture(self):
+        return self._capture.close_capture()
+
+    def save_capture(self, capture_path):
+        return self._capture.save_capture(capture_path)
+
+    def embed_dependencies(self):
+        return self._capture.embed_dependencies()
+
+    def remove_dependencies(self):
+        return self._capture.remove_dependencies()
+
+    def list_capture_formats(self):
+        return self._capture.list_capture_formats()
+
+    def convert_capture(self, filename, filetype="rdc"):
+        return self._capture.convert_capture(filename, filetype)
+
+    def set_event(self, event_id, force=True):
+        return self._capture.set_event(event_id, force)
+
+    def export_texture(self, resource_id, path=None, mip=0, slice_idx=0, sample=0, dest_type="png"):
+        return self._export.export_texture(resource_id, path, mip, slice_idx, sample, dest_type)
+
+    def export_render_target(self, event_id, path=None, target_index=0, dest_type="png"):
+        return self._export.export_render_target(event_id, path, target_index, dest_type)
+
+    def get_thumbnail(self, path=None, dest_type="png"):
+        return self._export.get_thumbnail(path, dest_type)
+
+    def export_buffer(self, resource_id, path=None, offset=0, length=0):
+        return self._export.export_buffer(resource_id, path, offset, length)
+
+    def debug_pixel(self, event_id, x, y, sample=None, primitive=None, max_steps=64, last_n=8):
+        return self._debug.debug_pixel(event_id, x, y, sample, primitive, max_steps, last_n)
+
+    def debug_vertex(self, event_id, vertex_id, instance=0, index=None, view=0, max_steps=64, last_n=8):
+        return self._debug.debug_vertex(event_id, vertex_id, instance, index, view, max_steps, last_n)
+
+    def debug_thread(self, event_id, group_x, group_y, group_z, thread_x, thread_y, thread_z, max_steps=64, last_n=8):
+        return self._debug.debug_thread(
+            event_id, group_x, group_y, group_z, thread_x, thread_y, thread_z, max_steps, last_n
+        )
+
+    def list_resources(self, resource_type=None, name=None, limit=200):
+        return self._resource.list_resources(resource_type, name, limit)
+
+    def get_resource(self, resource_id):
+        return self._resource.get_resource(resource_id)
+
+    def replace_resource(self, original_resource_id, replacement_resource_id):
+        return self._resource.replace_resource(original_resource_id, replacement_resource_id)
+
+    def restore_resource(self, original_resource_id):
+        return self._resource.restore_resource(original_resource_id)
+
+    def restore_all_replacements(self):
+        return self._resource.restore_all_replacements()
+
+    def get_texture_stats(self, resource_id, event_id=None, mip=0, slice_idx=0, histogram=False):
+        return self._resource.get_texture_stats(resource_id, event_id, mip, slice_idx, histogram)
+
+    def list_shader_encodings(self):
+        return self._shader_edit.list_shader_encodings()
+
+    def list_shaders(self, stage=None, limit=200):
+        return self._shader_edit.list_shaders(stage, limit)
+
+    def shader_map(self, limit=200):
+        return self._shader_edit.shader_map(limit)
+
+    def search_shaders(self, pattern, stage=None, limit=50):
+        return self._shader_edit.search_shaders(pattern, stage, limit)
+
+    def compile_custom_shader(self, source, stage, entry, encoding="hlsl"):
+        return self._shader_edit.compile_custom_shader(source, stage, entry, encoding)
+
+    def get_counters(self, event_id=None, name_filter=None, list_only=False):
+        return self._analysis.get_counters(event_id, name_filter, list_only)
+
+    def get_snapshot(self, event_id):
+        return self._analysis.get_snapshot(event_id)
+
+    def list_sections(self):
+        return self._analysis.list_sections()
+
+    def get_section(self, index=None, name=None, max_bytes=4096):
+        return self._analysis.get_section(index, name, max_bytes)
+
+    def write_section(self, name, contents, section_type="unknown"):
+        return self._analysis.write_section(name, contents, section_type)

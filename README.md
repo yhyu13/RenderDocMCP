@@ -72,14 +72,69 @@ RenderDocMCP/
 | `get_buffer_contents` | 获取缓冲区数据（可指定 offset/长度） |
 | `get_texture_info` | 纹理元数据 |
 | `get_texture_data` | 纹理像素数据（支持 mip/slice/3D 切片） |
-| `get_pipeline_state` | 完整管线状态 |
+| `get_pipeline_state` | 完整管线状态（含 rasterizer / depth_stencil / blend） |
+| `pick_pixel` | 读取单个像素（Texture Viewer 右键；优先于整张 `get_texture_data`） |
+| `get_pixel_history` | 像素历史：谁写入了该像素、谁因 depth/stencil/backface 失败 |
+| `get_mesh_data` | Mesh Viewer：采样 VS 输入 vs VS 输出（默认 8 个顶点） |
+| `get_resource_usage` | 资源在帧内的读写事件（时间线 usage strip） |
+
+### 会话 / 导出（Phase 1）
+
+| 工具名 | 说明 |
+|---------|------|
+| `close_capture` | 关闭当前捕获 |
+| `save_capture` | 把带 shader/resource 替换的捕获另存为新 `.rdc` |
+| `embed_dependencies` / `remove_dependencies` | 把 shader debug 文件嵌入/移出捕获（`debug_*` 可移植） |
+| `list_capture_formats` / `convert_capture` | 列出可转换格式并导出捕获 |
+| `set_event` | 把 UI（Texture Viewer 等）跳到指定 event（`SetEventID`，不是纯 replay） |
+| `export_texture` | `SaveTexture` 到磁盘；JSON 只返回路径，不塞图 |
+| `export_render_target` | 导出该 event 的 color target |
+| `get_thumbnail` | 最后一次 present/draw 的 color target 缩略图 |
+| `export_buffer` | 把 buffer 字节写到文件 |
+
+### Shader 步进调试（Phase 2）
+
+| 工具名 | 说明 |
+|---------|------|
+| `debug_pixel` | 像素着色器步进（默认 64 步 / 最后 8 态，硬顶 256；bridge 超时 120s） |
+| `debug_vertex` | 顶点着色器步进 |
+| `debug_thread` | Compute 单线程步进 |
+
+### 资源目录 + 通用替换（Phase 3）
+
+| 工具名 | 说明 |
+|---------|------|
+| `list_resources` / `get_resource` | 资源目录与元数据（含是否已被替换） |
+| `replace_resource` | 通用 `ReplaceResource` + `RegisterReplacement`（纹理/缓冲/shader；可 `save_capture` 持久化。不能写入纹理/缓冲字节，只能换 ResourceId） |
+| `restore_resource` / `restore_all_replacements` | 撤销替换 |
+| `get_texture_stats` | GPU `GetMinMax` 每通道 min/max + 可选 16-bucket histogram；**不**把整张图读进 Python |
+
+### Shader 扩展（Phase 4）
+
+| 工具名 | 说明 |
+|---------|------|
+| `list_shader_encodings` | 该捕获 API 支持的 target / custom 编码 |
+| `list_shaders` / `shader_map` | 帧内 shader 列表与 event×stage 映射 |
+| `search_shaders` | 在反汇编中搜子串（短 snippet，不是整份 ISA） |
+| `compile_custom_shader` | `BuildCustomShader`（可视化 shader，不是 target 替换） |
+
+### 计数器 / 快照 / 捕获节（Phase 5）
+
+| 工具名 | 说明 |
+|---------|------|
+| `get_counters` | GPU counters；`list_only` 只枚举不 fetch |
+| `get_snapshot` | 紧凑 event 快照（action + RT + shader ids） |
+| `list_sections` / `get_section` | 捕获文件节（VFS 式；`get_section` 拒绝 >4 MiB 的节，避免整段 framecapture 进内存） |
+| `write_section` | `WriteSection`：写入 notes/bookmarks/resrenames/unknown（内容 cap 64 KiB） |
+
+不在本仓库扩展范围内：live capture / inject / daemon（扩展无法驱动目标进程）；双捕获 diff 与 CI assert 留在 `rdc_harness`。
 
 ### Shader 编辑 / 重放工具（rdc 内闭环）
 
 | 工具名 | 说明 |
 |---------|------|
 | `get_shader_source` | 获取 shader 的原始字节与编码（`is_source_text` 标记是否可编辑） |
-| `compile_shader` | 编译 HLSL/GLSL 源为捕获 API 可用的替换 shader |
+| `compile_shader` | 编译 HLSL/GLSL 源为捕获 API 可用的替换 shader。`compile_flags="debug"` 带 `D3DCOMPILE_DEBUG`+`SKIP_OPTIMIZATION`（`debug_pixel` 需要） |
 | `replace_shader` | 用编译后的 shader 替换指定 event/stage 的 shader |
 | `remove_shader_replacement` | 撤销替换，恢复原 shader |
 | `replay_event` | 重放捕获到指定 event（应用所有替换） |
@@ -96,8 +151,11 @@ get_draw_calls(
     event_id_max=7600,          # event_id 范围终点
     only_actions=True,          # 排除标记（仅绘制调用）
     flags_filter=["Drawcall", "Dispatch"],  # 仅保留指定 flag
+    preset="unity_game_rendering",  # Unity Editor：Camera.Render + 去掉 GUI/EditorLoop
 )
 ```
+
+人类 90% 工具箱（Event Browser / Texture Viewer / Pipeline / Mesh Viewer / Pixel History）见本仓库 `renderdoc-human-experience.md`（与 sibling `renderdoc-skill/` 同步）。视觉问题优先 `pick_pixel` / `get_pixel_history`，网格问题优先 `get_mesh_data`，不要一上来 `get_texture_data` 整图。
 
 ### 捕获管理工具
 
@@ -107,6 +165,11 @@ list_captures(directory="D:\\captures")
 
 open_capture(capture_path="D:\\captures\\game.rdc")
 # → {"success": true, "filename": "game.rdc", "api": "D3D11"}
+
+close_capture()
+save_capture(capture_path="D:\\captures\\game_patched.rdc")
+set_event(event_id=7538)
+export_texture(resource_id="ResourceId::22573", path="D:\\out\\rt.png")
 ```
 
 ### 反查搜索工具
@@ -140,6 +203,7 @@ get_action_timings(marker_filter="Camera.Render", exclude_markers=["GUI.Repaint"
 - **L2 行为验证**（`behavioral.py`）：像素 diff、PSNR、渲染目标哈希，与 golden 图对比。
 - **编排器**（`orchestrator.iterate_shader_fix`）：`compile → inject → replay → L1 → L2 → patch → repeat` 循环，通过 `ShaderBackend`/`ShaderPatcher` 协议与 RenderDoc 解耦，可无 GPU 单元测试。
 - **报告**（`report.py`）：输出 before/after 对比报告，供人工/CI 决策。
+- **闭环导出**（`export.py`）：`write_shader_patch` 写出 unified diff + 最终 `.hlsl`；`write_golden` / `check_against_golden` 管理 L2 渲染目标基线（hash sidecar）。
 
 `RenderDocShaderBackend`（`rdc_harness/renderdoc_backend.py`）通过 MCP bridge 调用上述 shader 编辑工具，实现真正的 RenderDoc 侧 I/O：
 

@@ -14,6 +14,33 @@ class ActionService:
         self.ctx = ctx
         self._invoke = invoke_fn
 
+    UNITY_EXCLUDE_MARKERS = (
+        "GUI.Repaint",
+        "UIR.DrawChain",
+        "GUITexture.Draw",
+        "UGUI.Rendering.RenderOverlays",
+        "PlayerEndOfFrame",
+        "EditorLoop",
+    )
+    UNITY_MARKER_FILTER = "Camera.Render"
+
+    def _apply_preset(self, preset, marker_filter, exclude_markers):
+        """Expand named presets (Unity editor noise). Explicit args still win as a base."""
+        if not preset:
+            return marker_filter, exclude_markers
+        if preset != "unity_game_rendering":
+            raise ValueError("unknown draw preset: %s" % preset)
+        if marker_filter is None:
+            marker_filter = self.UNITY_MARKER_FILTER
+        merged = list(self.UNITY_EXCLUDE_MARKERS)
+        if exclude_markers:
+            seen = set(merged)
+            for name in exclude_markers:
+                if name not in seen:
+                    merged.append(name)
+                    seen.add(name)
+        return marker_filter, merged
+
     def get_draw_calls(
         self,
         include_children=True,
@@ -23,12 +50,16 @@ class ActionService:
         event_id_max=None,
         only_actions=False,
         flags_filter=None,
+        preset=None,
     ):
         """
         Get all draw calls/actions in the capture with optional filtering.
         """
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
+        marker_filter, exclude_markers = self._apply_preset(
+            preset, marker_filter, exclude_markers
+        )
 
         result = {"actions": []}
 

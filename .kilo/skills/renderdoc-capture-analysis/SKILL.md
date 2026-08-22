@@ -24,10 +24,13 @@ RenderDoc captures can produce 70 KB+ of raw draw-call JSON. Always descend from
 
 ```
 1. get_frame_summary()          → choose a marker / event range
-2. get_draw_calls(filtered)     → narrow to the relevant subtree
-3. find_draws_by_*()            → jump directly to suspect draws
-4. get_draw_call_details() / get_pipeline_state() / get_shader_info()
-   → inspect the specific event
+2. get_draw_calls(filtered)     → Unity: preset="unity_game_rendering"
+3. Symptom fork (human 90% toolkit — do not dump the frame):
+   - wrong pixel  → pick_pixel → get_pixel_history (last passing fragment)
+   - mesh wrong   → get_mesh_data (input vs VSOut; if input already bad, stop)
+   - invisible    → get_pipeline_state rasterizer/depth_stencil/blend
+   - wrong colour → pick_pixel + pipeline blend + PS constants
+4. find_draws_by_*() / get_shader_info() only after the fork points at a draw
 ```
 
 Never call `get_draw_calls(include_children=true)` on an entire frame unless the capture is tiny.
@@ -64,19 +67,19 @@ Never call `get_draw_calls(include_children=true)` on an entire frame unless the
 ### Unity Editor capture — game rendering only
 
 ```python
-get_draw_calls(
-    include_children=True,
-    marker_filter="Camera.Render",
-    exclude_markers=[
-        "GUI.Repaint",
-        "UIR.DrawChain",
-        "GUITexture.Draw",
-        "UGUI.Rendering.RenderOverlays",
-        "PlayerEndOfFrame",
-        "EditorLoop",
-    ],
-    only_actions=False,
-)
+get_draw_calls(preset="unity_game_rendering")
+# equivalent: marker_filter="Camera.Render" plus the GUI.Repaint / UIR.DrawChain /
+# EditorLoop exclude list. Do not dump the whole Unity Editor frame.
+```
+
+### Visual / mesh bugs (prefer these over get_texture_data)
+
+```python
+pick_pixel(event_id, x, y)                    # one texel, not the whole RT
+get_pixel_history(event_id, x, y)             # who wrote it; last passed=true
+get_mesh_data(event_id, max_vertices=8)       # VSIn vs VSOut sample
+get_pipeline_state(event_id)                  # rasterizer / depth_stencil / blend
+get_resource_usage(resource_id)               # timeline usage strip
 ```
 
 ### Focused dispatch / compute investigation

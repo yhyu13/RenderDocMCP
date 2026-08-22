@@ -7,6 +7,14 @@ import base64
 import renderdoc as rd
 
 from ..utils import Parsers
+from ..utils.tex_stats import (
+    channels_from_pixel,
+    histogram_channels,
+    histogram_range,
+    nan_inf_flags,
+    reduce_histogram,
+    unique_flags,
+)
 
 
 class ResourceService:
@@ -66,6 +74,250 @@ class ResourceService:
 
         self._invoke(callback)
 
+        if result["error"]:
+            raise ValueError(result["error"])
+        return result["data"]
+
+    def list_resources(self, resource_type=None, name=None, limit=200):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        if limit is None or int(limit) <= 0:
+            limit = 200
+        limit = min(int(limit), 2000)
+        type_filter = (resource_type or "").lower()
+        name_filter = (name or "").lower()
+        items = []
+        for res in self.ctx.GetResources() or []:
+            rid = str(res.resourceId)
+            rtype = str(getattr(res, "type", "") or "")
+            rname = ""
+            try:
+                rname = self.ctx.GetResourceName(res.resourceId) or ""
+            except Exception:
+                rname = getattr(res, "name", "") or ""
+            if type_filter and type_filter not in rtype.lower():
+                continue
+            if name_filter and name_filter not in rname.lower() and name_filter not in rid.lower():
+                continue
+            items.append({
+                "resource_id": rid,
+                "type": rtype,
+                "name": rname,
+            })
+        truncated = len(items) > limit
+        return {
+            "count": len(items),
+            "returned": min(len(items), limit),
+            "truncated": truncated,
+            "resources": items[:limit],
+        }
+
+    def get_resource(self, resource_id):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        rid = Parsers.parse_resource_id(resource_id)
+        desc = None
+        try:
+            desc = self.ctx.GetResource(rid)
+        except Exception:
+            desc = None
+        if desc is None:
+            raise ValueError("Resource not found: %s" % resource_id)
+        name = ""
+        try:
+            name = self.ctx.GetResourceName(rid) or ""
+        except Exception:
+            name = ""
+        replaced = False
+        replacement = None
+        try:
+            replaced = bool(self.ctx.IsResourceReplaced(rid))
+            if replaced:
+                replacement = str(self.ctx.GetResourceReplacement(rid))
+        except Exception:
+            pass
+        info = {
+            "resource_id": str(rid),
+            "name": name,
+            "type": str(getattr(desc, "type", "") or ""),
+            "replaced": replaced,
+            "replacement_resource_id": replacement,
+        }
+        try:
+            tex = self.ctx.GetTexture(rid)
+            if tex:
+                info["texture"] = {
+                    "width": tex.width,
+                    "height": tex.height,
+                    "depth": tex.depth,
+                    "mips": tex.mips,
+                    "format": str(tex.format.Name()),
+                }
+        except Exception:
+            pass
+        try:
+            buf = self.ctx.GetBuffer(rid)
+            if buf:
+                info["buffer"] = {"length": buf.length}
+        except Exception:
+            pass
+        return info
+
+    def replace_resource(self, original_resource_id, replacement_resource_id):
+        """Swap one capture resource for another already in the capture.
+
+        ReplayController.ReplaceResource applies the swap for subsequent
+        replay; CaptureContext.RegisterReplacement makes it UI-visible and
+        persistable via save_capture. There is no SetTextureData/SetBufferData
+        — you can only swap to another ResourceId (or a compiled shader).
+        """
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        original = Parsers.parse_resource_id(original_resource_id)
+        replacement = Parsers.parse_resource_id(replacement_resource_id)
+        result = {"error": None}
+
+        def callback(controller):
+            try:
+                controller.ReplaceResource(original, replacement)
+            except Exception as e:
+                result["error"] = "ReplaceResource failed: %s" % str(e)
+
+        self._invoke(callback)
+        if result["error"]:
+            raise ValueError(result["error"])
+        ui_registered = False
+        try:
+            self.ctx.RegisterReplacement(original, replacement)
+            ui_registered = True
+        except Exception:
+            ui_registered = False
+        return {
+            "original_resource_id": str(original),
+            "replacement_resource_id": str(replacement),
+            "replay_replaced": True,
+            "ui_registered": ui_registered,
+            "note": (
+                "replay + UI replacement; save_capture persists it. "
+                "Cannot inject texture/buffer bytes — swap ResourceIds only."
+            ),
+        }
+
+    def restore_resource(self, original_resource_id):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        original = Parsers.parse_resource_id(original_resource_id)
+        result = {"error": None}
+
+        def callback(controller):
+            try:
+                controller.RemoveReplacement(original)
+            except Exception as e:
+                result["error"] = "RemoveReplacement failed: %s" % str(e)
+
+        self._invoke(callback)
+        if result["error"]:
+            raise ValueError(result["error"])
+        try:
+            self.ctx.UnregisterReplacement(original)
+        except Exception:
+            pass
+        return {"resource_id": str(original), "restored": True}
+
+    def restore_all_replacements(self):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        originals = []
+        for res in self.ctx.GetResources() or []:
+            rid = res.resourceId
+            try:
+                if self.ctx.IsResourceReplaced(rid):
+                    originals.append(rid)
+            except Exception:
+                continue
+        restored = []
+        errors = []
+        for rid in originals:
+            try:
+                self.restore_resource(str(rid))
+                restored.append(str(rid))
+            except Exception as e:
+                errors.append({"resource_id": str(rid), "error": str(e)})
+        return {"restored": restored, "count": len(restored), "errors": errors}
+
+    def get_texture_stats(self, resource_id, event_id=None, mip=0, slice_idx=0, histogram=False):
+        """Per-channel min/max via ReplayController.GetMinMax (GPU, format-aware).
+
+        Never calls GetTextureData. Optional histogram uses GetHistogram over the
+        observed float range, then downsamples to 16 buckets. HDR/NaN shows up as
+        anomalies, not 'min: 0, max: 255' byte noise.
+        """
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        result = {"data": None, "error": None}
+
+        def callback(controller):
+            if event_id is not None:
+                controller.SetFrameEvent(int(event_id), True)
+            tex = self._find_texture_by_id(controller, resource_id)
+            if tex is None:
+                result["error"] = "Texture not found: %s" % resource_id
+                return
+            sub = rd.Subresource()
+            sub.mip = int(mip)
+            sub.slice = int(slice_idx)
+            try:
+                pair = controller.GetMinMax(tex.resourceId, sub, rd.CompType.Typeless)
+            except Exception as e:
+                result["error"] = "GetMinMax failed: %s" % str(e)
+                return
+            if not pair or len(pair) < 2:
+                result["error"] = "GetMinMax returned no data"
+                return
+            min_ch = channels_from_pixel(pair[0])
+            max_ch = channels_from_pixel(pair[1])
+            anomalies = unique_flags(
+                nan_inf_flags(min_ch.get("float")),
+                nan_inf_flags(max_ch.get("float")),
+            )
+            fmt = ""
+            try:
+                fmt = str(tex.format.Name())
+            except Exception:
+                fmt = ""
+            out = {
+                "resource_id": resource_id,
+                "format": fmt,
+                "mip": int(mip),
+                "slice": int(slice_idx),
+                "min": min_ch,
+                "max": max_ch,
+                "anomalies": anomalies,
+                "note": "GPU GetMinMax; not a CPU byte scan. Prefer pick_pixel for one pixel.",
+            }
+            if histogram:
+                rng = histogram_range(min_ch.get("float"), max_ch.get("float"))
+                if rng is None:
+                    out["histogram_16"] = []
+                    out["histogram_note"] = "skipped: NaN/Inf or degenerate float range"
+                else:
+                    try:
+                        buckets = controller.GetHistogram(
+                            tex.resourceId,
+                            sub,
+                            rd.CompType.Typeless,
+                            rng[0],
+                            rng[1],
+                            histogram_channels(True),
+                        )
+                    except Exception as e:
+                        result["error"] = "GetHistogram failed: %s" % str(e)
+                        return
+                    out["histogram_16"] = reduce_histogram(buckets)
+                    out["histogram_range"] = [rng[0], rng[1]]
+            result["data"] = out
+
+        self._invoke(callback)
         if result["error"]:
             raise ValueError(result["error"])
         return result["data"]
@@ -209,6 +461,47 @@ class ResourceService:
 
         self._invoke(callback)
 
+        if result["error"]:
+            raise ValueError(result["error"])
+        return result["data"]
+
+    def get_resource_usage(self, resource_id):
+        """Events that read or write this resource (Texture Viewer / timeline usage strip)."""
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+
+        result = {"data": None, "error": None}
+
+        def callback(controller):
+            try:
+                rid = Parsers.parse_resource_id(resource_id)
+            except Exception:
+                result["error"] = "Invalid resource ID: %s" % resource_id
+                return
+            try:
+                usages = controller.GetUsage(rid)
+            except Exception as e:
+                result["error"] = "GetUsage failed: %s" % str(e)
+                return
+            events = []
+            for u in usages or []:
+                events.append({
+                    "event_id": getattr(u, "eventId", None),
+                    "usage": str(getattr(u, "usage", "")),
+                })
+            name = ""
+            try:
+                name = self.ctx.GetResourceName(rid) or ""
+            except Exception:
+                name = ""
+            result["data"] = {
+                "resource_id": resource_id,
+                "resource_name": name,
+                "count": len(events),
+                "events": events,
+            }
+
+        self._invoke(callback)
         if result["error"]:
             raise ValueError(result["error"])
         return result["data"]

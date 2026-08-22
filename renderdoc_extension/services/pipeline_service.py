@@ -158,6 +158,16 @@ class PipelineService:
             except Exception:
                 pass
 
+            try:
+                pipeline_info["topology"] = str(pipe.GetPrimitiveTopology())
+            except Exception:
+                pass
+
+            # Rasterizer / depth / blend — Matias "nothing rendered" / "colours wrong"
+            pipeline_info["rasterizer"] = self._get_rasterizer(pipe)
+            pipeline_info["depth_stencil"] = self._get_depth_stencil(pipe)
+            pipeline_info["blend"] = self._get_blend(pipe)
+
             result["pipeline"] = pipeline_info
 
         self._invoke(callback)
@@ -396,6 +406,102 @@ class PipelineService:
             cbuffers.append(cb_info)
 
         return cbuffers
+
+    def _get_rasterizer(self, pipe):
+        """Common rasterizer subset (cull/fill/winding)."""
+        info = {}
+        try:
+            rs = pipe.GetRasterState()
+            if rs:
+                info["cull_mode"] = str(rs.cullMode)
+                info["fill_mode"] = str(rs.fillMode)
+                info["front_ccw"] = bool(rs.frontCCW)
+        except Exception as e:
+            info["error"] = str(e)
+        try:
+            vp = pipe.GetViewport(0)
+            if vp:
+                info["viewport"] = {
+                    "x": vp.x,
+                    "y": vp.y,
+                    "width": vp.width,
+                    "height": vp.height,
+                    "min_depth": vp.minDepth,
+                    "max_depth": vp.maxDepth,
+                    "enabled": bool(getattr(vp, "enabled", True)),
+                }
+        except Exception:
+            pass
+        try:
+            sc = pipe.GetScissor(0)
+            if sc:
+                info["scissor"] = {
+                    "x": sc.x,
+                    "y": sc.y,
+                    "width": sc.width,
+                    "height": sc.height,
+                    "enabled": bool(getattr(sc, "enabled", False)),
+                }
+        except Exception:
+            pass
+        return info
+
+    def _get_depth_stencil(self, pipe):
+        info = {}
+        try:
+            ds = pipe.GetDepthTestState()
+            if ds:
+                info["depth_enable"] = bool(ds.depthEnable)
+                info["depth_writes"] = bool(ds.depthWrites)
+                info["depth_function"] = str(ds.depthFunction)
+                info["depth_bounds"] = bool(ds.depthBounds)
+        except Exception as e:
+            info["error"] = str(e)
+        try:
+            info["stencil_enable"] = bool(pipe.IsStencilTestEnabled())
+        except Exception:
+            pass
+        return info
+
+    def _get_blend(self, pipe):
+        info = {"targets": []}
+        try:
+            blends = pipe.GetColorBlends()
+            for i, b in enumerate(blends or []):
+                target = {
+                    "index": i,
+                    "enabled": bool(b.enabled),
+                    "write_mask": int(b.writeMask),
+                    "logic_op_enabled": bool(getattr(b, "logicOperationEnabled", False)),
+                }
+                try:
+                    cb = b.colorBlend
+                    target["color"] = {
+                        "source": str(cb.source),
+                        "destination": str(cb.destination),
+                        "operation": str(cb.operation),
+                    }
+                except Exception:
+                    pass
+                try:
+                    ab = b.alphaBlend
+                    target["alpha"] = {
+                        "source": str(ab.source),
+                        "destination": str(ab.destination),
+                        "operation": str(ab.operation),
+                    }
+                except Exception:
+                    pass
+                info["targets"].append(target)
+        except Exception as e:
+            info["error"] = str(e)
+        try:
+            factor = pipe.GetBlendFactor()
+            if factor:
+                info["blend_factor"] = [float(c) for c in factor[:4]]
+        except Exception:
+            pass
+        return info
 
     def _get_resource_bindings(self, reflection):
         """Get shader resource bindings"""

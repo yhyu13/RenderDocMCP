@@ -42,6 +42,7 @@ Packaging is uv-managed (`uv.lock`, `[tool.uv] package = true`); console script 
 - All `ReplayController` access on the extension side must go through `BlockInvoke` (see `renderdoc_facade.py`).
 - `rdc_harness` orchestration (`orchestrator.iterate_shader_fix`) is decoupled from RenderDoc via the `ShaderBackend`/`ShaderPatcher` protocols so it stays unit-testable without a GPU; `renderdoc_backend.RenderDocShaderBackend` is the only adapter that touches the MCP bridge. Keep that seam when extending.
 - WebGPU (D3D12 backend) captures are inspectable as ordinary D3D12 captures; shader source is Dawn's WGSL→HLSL lowering, not WGSL.
+- Human 90% toolkit (sibling `renderdoc-skill/renderdoc-human-experience.md`): `pick_pixel`, `get_pixel_history`, `get_mesh_data`, `get_resource_usage`, plus `get_pipeline_state` rasterizer/depth/blend. Unity Editor captures use `get_draw_calls(preset="unity_game_rendering")`. Do not start visual debug with a full `get_texture_data`.
 
 ## Documentation
 

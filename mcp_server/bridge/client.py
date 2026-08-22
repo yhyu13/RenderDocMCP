@@ -24,6 +24,12 @@ class RenderDocBridgeError(Exception):
     pass
 
 
+# Shader-step debug can exceed the default 30s file-IPC wait.
+DEBUG_METHODS = frozenset({"debug_pixel", "debug_vertex", "debug_thread"})
+DEBUG_TIMEOUT = 120.0
+DEFAULT_TIMEOUT = 30.0
+
+
 class RenderDocBridge:
     """Client for communicating with RenderDoc extension via file-based IPC"""
 
@@ -31,9 +37,21 @@ class RenderDocBridge:
         # host/port are kept for API compatibility but not used
         self.host = host
         self.port = port
-        self.timeout = 30.0  # seconds
+        self.timeout = DEFAULT_TIMEOUT
 
-    def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+    def timeout_for(self, method: str, timeout: float | None = None) -> float:
+        if timeout is not None:
+            return float(timeout)
+        if method in DEBUG_METHODS:
+            return DEBUG_TIMEOUT
+        return self.timeout
+
+    def call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+    ) -> Any:
         """Call a method on the RenderDoc extension"""
         # Check if IPC directory exists
         if not os.path.exists(IPC_DIR):
@@ -66,6 +84,7 @@ class RenderDocBridge:
 
             # Wait for response
             start_time = time.time()
+            wait = self.timeout_for(method, timeout)
             while True:
                 if os.path.exists(RESPONSE_FILE):
                     # Small delay to ensure file is fully written
@@ -85,7 +104,7 @@ class RenderDocBridge:
                     return response.get("result")
 
                 # Check timeout
-                if time.time() - start_time > self.timeout:
+                if time.time() - start_time > wait:
                     raise RenderDocBridgeError("Request timed out")
 
                 # Poll interval

@@ -43,3 +43,67 @@
 ## Cross-repo workstreams
 
 The **WebGPU capture** workstream (Chrome D3D12 process-injection capture, `capture_webgpu.py`, `references/webgpu-capture.md`, `12_ddgi` recipe) landed in `renderdoc-skill/`. This repo's contribution was a one-line WebGPU(D3D12) compatibility note in the README — the extension runs in RenderDoc's Python 3.6 sandbox and can't drive Chrome. See `renderdoc-skill/JOURNEY.md` for the workstream.
+
+---
+
+## Human 90% toolkit (2026-08-21)
+
+> Research dump lives in sibling `renderdoc-skill/renderdoc-human-experience.md`. Baldur's 90% loop is Event Browser / Texture Viewer / Pipeline / Mesh Viewer + Pixel History. The bridge had data-access leftovers but not that loop.
+
+| Me | You |
+|---|---|
+| "search web for renderdoc human experience, dump them to doc, then improve both repo" | Dumped practitioner workflow (Baldur, Matias Lavik, Jeremy Ong, Unity/UE docs, FAQ, GitHub issues) into `renderdoc-skill/renderdoc-human-experience.md`. Mapped gaps: no pick_pixel, no pixel history, no mesh in/out, pipeline missing RS/DS/OM, Unity preset proposed but unimplemented. |
+| — | MCP: `PixelService` / `MeshService`; `pick_pixel`, `get_pixel_history` (cap 32), `get_mesh_data` (sample 8 verts), `get_resource_usage`; `get_pipeline_state` now includes rasterizer/depth_stencil/blend; `get_draw_calls(preset="unity_game_rendering")`. L1 `check_invisible_pipeline` (write_mask 0 / empty viewport / FrontAndBack cull). `rdc_harness.human_toolkit` is GPU-free. 100 tests green after indexed-draw + SKIP follow-up (`py -3.13`). |
+
+### Deliverables
+
+- New tools: `pick_pixel`, `get_pixel_history`, `get_mesh_data`, `get_resource_usage`.
+- `get_draw_calls(..., preset="unity_game_rendering")`.
+- Pipeline JSON: `rasterizer`, `depth_stencil`, `blend`.
+- L1 rule `check_invisible_pipeline`; tests in `tests/test_human_toolkit.py`.
+
+---
+
+## In-capture write / rdc-cli parity phases 1–5 (2026-08-22)
+
+> Destination: in-capture API parity. Live capture / inject / daemon stay out. Two-capture diff and CI asserts stay in `rdc_harness`.
+
+| Me | You |
+|---|---|
+| "can we add write feats (e.g. edit shaders) and so on fully control renderdoc mcp read/write modify" | Shader compile/replace/replay already existed. Locked destination: phases 1–5 in this repo (session/export, shader-step debug, generic ReplaceResource, shader extras, counters/snapshot/VFS). Approach A: one MCP tool per op. |
+| Critic: partial-blend PASS over-claim; stale JOURNEY 91; vertex_span `* 16`; get_bytes None; `SetFrameEvent(force=False)` on pick/history. "respond to critic and finish rest phases no questions ask no stop" | Confirmed pick/history already `force=True`; blend PASS only claims `write_mask` when *every* target has it (`test_cull_plus_partial_blend_does_not_claim_write_mask`); `get_bytes` None-check + `* 16` comment already in `mesh_address`. Wired remaining tools through facade → request_handler → `@mcp.tool`. Debug tools use 120s file-IPC timeout. GPU-free tests in `tests/test_write_tools.py`. |
+
+### Deliverables
+
+- Session: `close_capture`, `save_capture`, `set_event`.
+- Export: `export_texture`, `export_render_target`, `get_thumbnail`, `export_buffer` (path in JSON, never image/buffer bytes).
+- Debug: `debug_pixel` / `debug_vertex` / `debug_thread` (capped states, always `FreeTrace`).
+- Resources: `list_resources`, `get_resource`, `replace_resource`, `restore_resource`, `restore_all_replacements`, `get_texture_stats`.
+- Shader extras: `list_shader_encodings`, `list_shaders`, `shader_map`, `search_shaders`, `compile_custom_shader`.
+- Analysis: `get_counters`, `get_snapshot`, `list_sections`, `get_section`.
+- Out of scope (unchanged): live capture/inject; two-capture diff.
+
+---
+
+## Write-surface hardening (2026-08-22, critic follow-up)
+
+> Destination unchanged: in-capture API ceiling. RenderDoc still cannot inject texture/buffer bytes or edit non-shader pipeline state.
+
+| Me | You |
+|---|---|
+| Critic of write expansion: `get_texture_stats` CPU byte loop is a timeout/HDR footgun; `replace_resource` docstring vs `RegisterReplacement`; `get_section` materializes full section; dead `DebugPixel` fallback; `_FILE_TYPE_MAP` dup; `WriteSection` unused. | Switched stats to GPU `GetMinMax`/`GetHistogram` (format-aware, NaN/Inf flags). Kept RegisterReplacement and documented it as the persist path. `get_section` refuses >4 MiB. Dropped dead fallback. Deduped file-type map. Added `write_section` (notes/bookmarks/resrenames/unknown, 64 KiB cap). GPU-free tests for tex_stats/sections/write_section. |
+
+### Hard ceiling (unchanged)
+
+- Can: compile/replace shaders, swap ResourceIds, save/export, custom viz shaders, write small capture sections.
+- Cannot: `SetTextureData` / `SetBufferData`; edit blend/rasterizer/vertex buffers and re-render.
+
+---
+
+## Beyond the replay ceiling (2026-08-22)
+
+> Ranked next: compile_flags → CaptureFile writes → patch/golden export. UAV-inject research deferred.
+
+| Me | You |
+|---|---|
+| "push further" ranked: (1) fix→patch + golden baselines, (2) Convert/EmbedDependencies, (3) compile_flags, (4) UAV-inject research not a tool. | (3) `compile_shader(..., compile_flags="debug")` → D3DCOMPILE_DEBUG+SKIP_OPTIMIZATION. (2) `embed_dependencies` / `remove_dependencies` / `list_capture_formats` / `convert_capture`. (1) `rdc_harness.export`: unified diff + `.hlsl` + hashed golden RT store. UAV-inject not shipped. Real-GPU loop still the remaining validation. |

@@ -145,3 +145,135 @@ class CaptureManager:
             pass
 
         return result
+
+    def close_capture(self):
+        if not self.ctx.IsCaptureLoaded():
+            return {"success": True, "closed": False, "note": "no capture loaded"}
+        try:
+            self.ctx.CloseCapture()
+        except Exception as e:
+            raise ValueError("Failed to close capture: %s" % str(e))
+        return {"success": True, "closed": True}
+
+    def save_capture(self, capture_path):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        if not capture_path:
+            raise ValueError("capture_path is required")
+        try:
+            ok = self.ctx.SaveCaptureTo(capture_path)
+        except Exception as e:
+            raise ValueError("SaveCaptureTo failed: %s" % str(e))
+        if ok is False:
+            raise ValueError("SaveCaptureTo returned False")
+        mods = None
+        try:
+            mods = str(self.ctx.GetCaptureModifications())
+        except Exception:
+            mods = None
+        return {
+            "success": True,
+            "path": capture_path,
+            "modifications": mods,
+            "note": "shader/resource replacements are stored in the saved .rdc",
+        }
+
+    def _capture_file(self):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        cap = None
+        try:
+            cap = self.ctx.GetCaptureFile()
+        except Exception:
+            cap = None
+        if cap is None:
+            raise ValueError("GetCaptureFile unavailable")
+        return cap
+
+    def _result_details(self, details, what):
+        ok = True
+        msg = ""
+        try:
+            ok = bool(details.OK())
+            msg = details.Message() if not ok else ""
+        except Exception:
+            ok = details is not False and details is not None
+        if not ok:
+            raise ValueError("%s failed: %s" % (what, msg or "unknown"))
+        return msg
+
+    def embed_dependencies(self):
+        """Embed shader-debug files into the capture (makes debug_* portable)."""
+        cap = self._capture_file()
+        try:
+            details = cap.EmbedDependenciesIntoCapture()
+        except Exception as e:
+            raise ValueError("EmbedDependenciesIntoCapture failed: %s" % str(e))
+        self._result_details(details, "EmbedDependenciesIntoCapture")
+        return {
+            "success": True,
+            "embedded": True,
+            "note": "shader debug files stored in the capture; save_capture to persist a copy",
+        }
+
+    def remove_dependencies(self):
+        """Remove previously embedded shader-debug files from the capture."""
+        cap = self._capture_file()
+        try:
+            details = cap.RemoveDependenciesFromCapture()
+        except Exception as e:
+            raise ValueError("RemoveDependenciesFromCapture failed: %s" % str(e))
+        self._result_details(details, "RemoveDependenciesFromCapture")
+        return {"success": True, "embedded": False}
+
+    def list_capture_formats(self):
+        cap = self._capture_file()
+        formats = []
+        try:
+            items = cap.GetCaptureFileFormats() or []
+        except Exception as e:
+            raise ValueError("GetCaptureFileFormats failed: %s" % str(e))
+        for fmt in items:
+            formats.append({
+                "extension": getattr(fmt, "extension", ""),
+                "name": getattr(fmt, "name", ""),
+                "open_supported": bool(getattr(fmt, "openSupported", False)),
+                "convert_supported": bool(getattr(fmt, "convertSupported", False)),
+            })
+        return {"count": len(formats), "formats": formats}
+
+    def convert_capture(self, filename, filetype="rdc"):
+        """Export/convert the open capture to another representation on disk."""
+        if not filename:
+            raise ValueError("filename is required")
+        cap = self._capture_file()
+        try:
+            details = cap.Convert(filename, filetype or "rdc", None, None)
+        except TypeError:
+            try:
+                details = cap.Convert(filename, filetype or "rdc", None)
+            except Exception as e:
+                raise ValueError("Convert failed: %s" % str(e))
+        except Exception as e:
+            raise ValueError("Convert failed: %s" % str(e))
+        self._result_details(details, "Convert")
+        return {
+            "success": True,
+            "path": filename,
+            "filetype": filetype or "rdc",
+        }
+
+    def set_event(self, event_id, force=True):
+        if not self.ctx.IsCaptureLoaded():
+            raise ValueError("No capture loaded")
+        try:
+            self.ctx.SetEventID([], int(event_id), int(event_id), bool(force))
+        except TypeError:
+            self.ctx.SetEventID([], int(event_id), int(event_id))
+        except Exception as e:
+            raise ValueError("SetEventID failed: %s" % str(e))
+        return {
+            "success": True,
+            "event_id": int(event_id),
+            "current_event": int(self.ctx.CurEvent()) if hasattr(self.ctx, "CurEvent") else int(event_id),
+        }
