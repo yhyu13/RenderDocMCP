@@ -43,6 +43,7 @@ Packaging is uv-managed (`uv.lock`, `[tool.uv] package = true`); console script 
 - `rdc_harness` orchestration (`orchestrator.iterate_shader_fix`) is decoupled from RenderDoc via the `ShaderBackend`/`ShaderPatcher` protocols so it stays unit-testable without a GPU; `renderdoc_backend.RenderDocShaderBackend` is the only adapter that touches the MCP bridge. Keep that seam when extending.
 - WebGPU (D3D12 backend) captures are inspectable as ordinary D3D12 captures; shader source is Dawn's WGSL→HLSL lowering, not WGSL.
 - Human 90% toolkit (sibling `renderdoc-skill/renderdoc-human-experience.md`): `pick_pixel`, `get_pixel_history`, `get_mesh_data`, `get_resource_usage`, plus `get_pipeline_state` rasterizer/depth/blend. Unity Editor captures use `get_draw_calls(preset="unity_game_rendering")`. Do not start visual debug with a full `get_texture_data`.
+- Response caching (`mcp_server/cache.py`) wraps the bridge on the MCP side. It read-through caches deterministic read tools, bypasses queue-draining/export/debug tools, and invalidates on mutating tools. Cache keys are scoped by capture identity (`get_capture_status().filename` + stat). Backend is in-memory by default; `RENDERDOC_MCP_CACHE_BACKEND=openviking` persists entries under `viking://resources/renderdoc-mcp-cache/` via the optional `openviking_sdk`. Never import cache code from `renderdoc_extension/` (Python 3.6 boundary). See `docs/openviking-cache-design.md`.
 
 ## Documentation
 

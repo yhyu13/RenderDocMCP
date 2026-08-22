@@ -238,6 +238,20 @@ get_action_timings(marker_filter="Camera.Render", exclude_markers=["GUI.Repaint"
 - `RegisterReplacement` / `UnregisterReplacement` 必须在 `BlockInvoke` **之外**调用（UI 线程）。放进 replay callback 会让下一次 `SetFrameEvent(force=True)` 死锁。
 - `replay_event` / `replace_shader` / `compile_shader` / `pick_pixel` 走 120s IPC 超时。OpenGL `frame480` 上带真实替换的 `replay_event(550)` 已实测返回 `{replayed:true}`；若将来再卡住，`pick_pixel` 自己会 `SetFrameEvent(force=True)`。
 
+## 响应缓存（OpenViking 可选后端）
+
+MCP 侧 `mcp_server/cache.py` 在 bridge 外包了一层读穿透缓存。确定性只读工具（`get_pipeline_state`、`get_texture_data`、`get_frame_summary`、`list_resources` 等）命中后不再走文件 IPC 和 GPU 重放；会改变捕获状态或资源的工具（`replace_shader`、`write_section`、`open_capture` 等）绕过缓存并清空缓存；`get_debug_messages` 这类会排空队列、以及导出/单步调试类工具永不缓存。
+
+缓存键 = 捕获身份 + 方法 + 规范化参数。捕获身份来自 `get_capture_status().filename` 并叠加文件 stat（路径、mtime、大小），避免不同捕获里相同 `event_id`/`ResourceId` 互相串数据。
+
+环境变量：
+
+- `RENDERDOC_MCP_CACHE=0`：关闭缓存。
+- `RENDERDOC_MCP_CACHE_BACKEND=memory|openviking`：默认 `memory`。`openviking` 需要可导入的 `openviking_sdk`，把条目持久化到 `viking://resources/renderdoc-mcp-cache/<key>.json`（写入用 `processing_mode="vectors_only"`，读回用 `read_raw`）。SDK 不可用时自动回退内存。
+- `RENDERDOC_MCP_CACHE_MAX_ENTRY_BYTES`：单条缓存字节上限，默认 4 MiB，超过则不缓存。
+
+设计文档（含自评审）见 `docs/openviking-cache-design.md`。缓存只存在于 MCP 侧（Python ≥ 3.10），**不**进入 `renderdoc_extension/`（Python 3.6 边界）。
+
 ## 已知坑（OpenGL `frame480` 实测）
 
 - `compile_shader` → `replace_shader` 必须用**同一次会话**返回的 `resource_id`；不要手拼 `ResourceId::N`。

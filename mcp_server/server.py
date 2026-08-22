@@ -8,6 +8,7 @@ from typing import Literal
 from fastmcp import FastMCP
 
 from .bridge.client import RenderDocBridge, RenderDocBridgeError
+from .cache import MemoryBackend, OpenVikingBackend, ResponseCache
 from .config import settings
 
 # Initialize FastMCP server
@@ -15,8 +16,23 @@ mcp = FastMCP(
     name="RenderDoc MCP Server",
 )
 
-# RenderDoc bridge client
-bridge = RenderDocBridge(host=settings.renderdoc_host, port=settings.renderdoc_port)
+# RenderDoc bridge client, optionally wrapped in a read-through response cache.
+_bridge = RenderDocBridge(host=settings.renderdoc_host, port=settings.renderdoc_port)
+if settings.cache_enabled:
+    if settings.cache_backend in ("openviking", "ov"):
+        try:
+            backend = OpenVikingBackend()
+        except Exception:
+            backend = MemoryBackend()
+    else:
+        backend = MemoryBackend()
+    bridge = ResponseCache(
+        _bridge,
+        backend=backend,
+        max_entry_bytes=settings.cache_max_entry_bytes,
+    )
+else:
+    bridge = _bridge
 
 
 @mcp.tool
