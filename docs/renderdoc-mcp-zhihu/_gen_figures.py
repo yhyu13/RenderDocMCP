@@ -245,6 +245,20 @@ def fig_cache():
     finish(fig, "11-cache.png")
 
 
+def fig_why():
+    fig, ax = plt.subplots(figsize=(10.2, 5.6))
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 5.6)
+    ax.axis("off")
+    ax.set_title("RenderDoc 是验收场，不是目的地", fontsize=16, pad=10, color="#2b2926", weight="semibold")
+    box(ax, 0.3, 3.15, 4.55, 2.0, "要验收的\n\nAgent 驾驭层：跨轮不改题\n听像素，不听口头成功", fc="#e8f1e4", size=13)
+    box(ax, 5.15, 3.15, 4.55, 2.0, "不是要验收的\n\n再做一个调试器插件\n把面板都做成工具", fc="#f6e4e0", size=13)
+    box(ax, 0.3, 0.4, 9.4, 2.4,
+        "真机器、老灶台、会死锁的回放\n题目必须钉住，空了接着干，像素变了才算完",
+        fc="#fffdf8", size=14)
+    finish(fig, "12-why-harness.png")
+
+
 def fig_takeaway():
     fig, ax = plt.subplots(figsize=(10.2, 6.2))
     ax.set_xlim(0, 10)
@@ -257,7 +271,7 @@ def fig_takeaway():
         (0.3, 2.35, "3  前台登记不要派进后厨\n否则两间屋子互相等"),
         (5.15, 2.35, "4  听像素，不听口头成功\n灰变品红才算完"),
         (0.3, 0.4, "5  回放台不是编辑器\n缺口补不上"),
-        (5.15, 0.4, "6  树根错了叶子会一起裂\n接到真机器上才会炸"),
+        (5.15, 0.4, "6  驾驭层听像素不听口头\n题目跨轮不许改小"),
     ]
     for x, y, t in items:
         box(ax, x, y, 4.55, 1.6, t, fc="#fffdf8", size=12)
@@ -265,6 +279,7 @@ def fig_takeaway():
 
 
 if __name__ == "__main__":
+    fig_why()
     fig_wrong()
     fig_thread()
     fig_tree()
