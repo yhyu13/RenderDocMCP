@@ -273,6 +273,13 @@ class TestSections(unittest.TestCase):
         with self.assertRaises(ValueError):
             sec.encode_section_contents(b"x" * (sec.SECTION_WRITE_CAP + 1))
 
+    def test_section_name_matches_suffix_and_type(self):
+        sec = _load("rd_sections_match", "sections.py")
+        self.assertTrue(sec.section_name_matches("renderdoc/ui/notes", "notes"))
+        self.assertTrue(sec.section_name_matches("renderdoc/ui/notes", "renderdoc/ui/notes"))
+        self.assertTrue(sec.section_name_matches("SectionType.Notes", "notes"))
+        self.assertFalse(sec.section_name_matches("renderdoc/internal/framecapture", "notes"))
+
 
 class TestCompileOpts(unittest.TestCase):
     def test_presets(self):
@@ -287,6 +294,20 @@ class TestCompileOpts(unittest.TestCase):
             opts.resolve_compile_flags("fast")
         custom = opts.resolve_compile_flags([{"name": "FOO", "value": "1"}])
         self.assertEqual(custom, [{"name": "FOO", "value": "1"}])
+
+    def test_glsl_binding_bumps_below_420(self):
+        opts = _load("rd_compile_opts_glsl", "compile_opts.py")
+        src = "#version 330\nlayout(binding=0) uniform sampler2D t;\nvoid main(){}"
+        bumped = opts.bump_glsl_binding_version(src, "glsl")
+        self.assertTrue(bumped.startswith("#version 420"))
+        same = opts.bump_glsl_binding_version(src, "hlsl")
+        self.assertTrue(same.startswith("#version 330"))
+        no_bind = opts.bump_glsl_binding_version("#version 330\nvoid main(){}", "glsl")
+        self.assertTrue(no_bind.startswith("#version 330"))
+        already = opts.bump_glsl_binding_version(
+            "#version 430\nlayout(binding=0) uniform sampler2D t;\n", "glsl"
+        )
+        self.assertTrue(already.startswith("#version 430"))
 
 
 class TestCaptureFileHandler(unittest.TestCase):
@@ -335,6 +356,134 @@ class TestWriteSectionHandler(unittest.TestCase):
         )
         self.assertEqual(resp["result"]["name"], "notes")
         self.assertEqual(resp["result"]["bytes"], 5)
+
+
+class TestRemainingHandlers(unittest.TestCase):
+    def test_find_resource_usage_replace_restore_set_event(self):
+        class Fake:
+            def find_draws_by_resource(self, resource_id):
+                return {"resource_id": resource_id, "matches": []}
+
+            def get_resource_usage(self, resource_id):
+                return {"resource_id": resource_id, "events": [{"event_id": 550}]}
+
+            def replace_resource(self, original, replacement):
+                return {
+                    "original_resource_id": original,
+                    "replacement_resource_id": replacement,
+                    "ui_registered": True,
+                }
+
+            def restore_resource(self, original):
+                return {"resource_id": original, "restored": True}
+
+            def restore_all_replacements(self):
+                return {"restored": [], "count": 0}
+
+            def set_event(self, event_id, force=True):
+                return {"event_id": event_id, "force": force}
+
+            def get_thumbnail(self, path=None, dest_type="png"):
+                return {"path": path or "thumb.png"}
+
+            def export_render_target(self, event_id, path=None, target_index=0, dest_type="png"):
+                return {"event_id": event_id, "path": path or "rt.png"}
+
+            def export_buffer(self, resource_id, path=None, offset=0, length=0):
+                return {"resource_id": resource_id, "path": path or "buf.bin"}
+
+            def compile_custom_shader(self, source, stage, entry, encoding="hlsl"):
+                return {"resource_id": "ResourceId::1", "custom": True}
+
+            def get_section(self, index=None, name=None, max_bytes=4096):
+                return {"name": name or "notes", "size": 30}
+
+            def remove_dependencies(self):
+                return {"embedded": False}
+
+        handler = _load_handler()(Fake())
+        missing = handler.handle(
+            {"id": 20, "method": "find_draws_by_resource", "params": {}}
+        )
+        self.assertIn("error", missing)
+        found = handler.handle(
+            {
+                "id": 21,
+                "method": "find_draws_by_resource",
+                "params": {"resource_id": "ResourceId::56"},
+            }
+        )
+        self.assertEqual(found["result"]["resource_id"], "ResourceId::56")
+        usage = handler.handle(
+            {
+                "id": 22,
+                "method": "get_resource_usage",
+                "params": {"resource_id": "ResourceId::56"},
+            }
+        )
+        self.assertEqual(usage["result"]["events"][0]["event_id"], 550)
+        swapped = handler.handle(
+            {
+                "id": 23,
+                "method": "replace_resource",
+                "params": {
+                    "original_resource_id": "ResourceId::48",
+                    "replacement_resource_id": "ResourceId::297",
+                },
+            }
+        )
+        self.assertTrue(swapped["result"]["ui_registered"])
+        restored = handler.handle(
+            {
+                "id": 24,
+                "method": "restore_resource",
+                "params": {"original_resource_id": "ResourceId::48"},
+            }
+        )
+        self.assertTrue(restored["result"]["restored"])
+        all_restored = handler.handle(
+            {"id": 25, "method": "restore_all_replacements", "params": {}}
+        )
+        self.assertEqual(all_restored["result"]["count"], 0)
+        jumped = handler.handle(
+            {"id": 26, "method": "set_event", "params": {"event_id": 550}}
+        )
+        self.assertEqual(jumped["result"]["event_id"], 550)
+        thumb = handler.handle({"id": 27, "method": "get_thumbnail", "params": {}})
+        self.assertIn("path", thumb["result"])
+        rt = handler.handle(
+            {"id": 28, "method": "export_render_target", "params": {"event_id": 550}}
+        )
+        self.assertEqual(rt["result"]["event_id"], 550)
+        buf = handler.handle(
+            {
+                "id": 29,
+                "method": "export_buffer",
+                "params": {"resource_id": "ResourceId::125"},
+            }
+        )
+        self.assertEqual(buf["result"]["resource_id"], "ResourceId::125")
+        custom = handler.handle(
+            {
+                "id": 30,
+                "method": "compile_custom_shader",
+                "params": {
+                    "source": "#version 330\n",
+                    "stage": "pixel",
+                    "entry": "main",
+                    "encoding": "glsl",
+                },
+            }
+        )
+        self.assertTrue(custom["result"]["custom"])
+        notes = handler.handle(
+            {"id": 31, "method": "get_section", "params": {"name": "notes"}}
+        )
+        self.assertEqual(notes["result"]["size"], 30)
+        removed = handler.handle(
+            {"id": 32, "method": "remove_dependencies", "params": {}}
+        )
+        self.assertFalse(removed["result"]["embedded"])
 
 
 class TestReplaceResourceNote(unittest.TestCase):

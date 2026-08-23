@@ -98,4 +98,19 @@ Independent re-check (2026-08-23, same loaded capture, no second magenta apply):
 
 Independent **retest** (2026-08-23 later, extension reinstalled with `_find_capture_format`, qrenderdoc restarted): magenta **was** re-applied. Pre `[0.010986328125 ×3, 0.9450980424880981]` → compile `ResourceId::1000000000000000297` → replace `ui_registered: true` → `replay_event(550)` `{replayed:true}` → post `[1.0, 0.0, 1.0, 1.0]` → restore back to original. `convert_capture(..., xml)` wrote `frame480_retest.xml` (1 081 556 B, header `<driver id="2">OpenGL</driver>`). `get_resource(::56/::125)`, `get_buffer_contents(::125)`, PNG 3523 B, encodings `["GLSL"]` still live. `mesh_to_obj` import in `export_service.py` remains unused.
 
+Live **gap close** (2026-08-23, same loaded capture, `scripts/live_gap_check.py`, no second magenta apply):
+
+| Tool | Result |
+|---|---|
+| `find_draws_by_resource(::56)` | 1 match: event 550, `ShaderStage.Pixel SRV slot 0` (no Hull false-positive) |
+| `get_resource_usage(::56)` | `Texture 56`, event 550, `ResourceUsage.PS_Resource` |
+| `get_shader_info(550, pixel)` | `ResourceId::48`, disassembly + `constant_buffers: [$Globals]` (no `GetConstantBuffer` crash) |
+| `get_thumbnail` | 1280×720 PNG, last present color target (event 554) |
+| `export_render_target(550)` | same 1280×720 PNG path |
+| `export_buffer(::125)` | 48-byte `.bin` |
+| `set_event(550)` | `{success:true, current_event:550}` |
+| `compile_custom_shader` GLSL 330+`layout(binding)` | compiled `ResourceId::…315` |
+| `restore_all_replacements` | empty set `{count:0}` |
+| `get_section(name="notes")` | **missed** exact `FindSectionByName("notes")` — real name is `renderdoc/ui/notes`. Full name works (`size:30`, base64 `bWNwLWxpdmUtdmFsaWRhdGlvbi0yMDI2LTA4LTIy`). Suffix/type fallback added in `sections.py`; needs extension reinstall to go live. |
+
 Not claimed: `debug_pixel` on OpenGL without debug info; injecting texture/buffer bytes; editing non-shader pipeline state.

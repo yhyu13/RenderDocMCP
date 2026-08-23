@@ -45,6 +45,26 @@ def section_load_allowed(uncompressed_size, cap=SECTION_LOAD_CAP):
         return False
 
 
+def section_name_matches(actual, query):
+    """True if query is the full name, a suffix after '/', or a type tail."""
+    if actual is None or query is None:
+        return False
+    a = str(actual).strip().lower()
+    q = str(query).strip().lower()
+    if not a or not q:
+        return False
+    if a == q:
+        return True
+    if a.endswith("/" + q):
+        return True
+    if a.split("/")[-1] == q:
+        return True
+    type_tail = a.split(".")[-1]
+    if type_tail == q:
+        return True
+    return False
+
+
 def encode_section_contents(contents):
     if contents is None:
         return b""

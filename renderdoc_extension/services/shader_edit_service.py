@@ -18,7 +18,7 @@ import base64
 import renderdoc as rd
 
 from ..utils import Parsers
-from ..utils.compile_opts import resolve_compile_flags
+from ..utils.compile_opts import bump_glsl_binding_version, resolve_compile_flags
 from ..utils.rid_cache import remember, resolve_live
 
 
@@ -479,16 +479,7 @@ class ShaderEditService:
         if not self.ctx.IsCaptureLoaded():
             raise ValueError("No capture loaded")
         result = {"compiled": None, "error": None}
-        if (encoding or "").lower() == "glsl":
-            src = source.lstrip()
-            if src.startswith("#version") and "layout" in source and "binding" in source:
-                first = src.splitlines()[0]
-                ver = first.replace("#version", "").strip().split()[0]
-                try:
-                    if int(ver) < 420:
-                        source = source.replace(first, "#version 420", 1)
-                except Exception:
-                    pass
+        source = bump_glsl_binding_version(source, encoding)
 
         def callback(controller):
             stage_enum = Parsers.parse_stage(stage)

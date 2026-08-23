@@ -11,6 +11,7 @@ from ..utils.sections import (
     clamp_section_json_bytes,
     encode_section_contents,
     section_load_allowed,
+    section_name_matches,
     section_type_enum_name,
 )
 
@@ -170,6 +171,22 @@ class AnalysisService:
                 index = cap.FindSectionByName(name)
             except Exception:
                 index = -1
+            if index is None or int(index) < 0:
+                index = -1
+                try:
+                    n = int(cap.GetSectionCount())
+                except Exception:
+                    n = 0
+                for i in range(n):
+                    try:
+                        props = cap.GetSectionProperties(i)
+                    except Exception:
+                        continue
+                    actual = getattr(props, "name", "")
+                    typ = str(getattr(props, "type", ""))
+                    if section_name_matches(actual, name) or section_name_matches(typ, name):
+                        index = i
+                        break
             if index is None or int(index) < 0:
                 raise ValueError("section not found: %s" % name)
         index = int(index)

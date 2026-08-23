@@ -37,3 +37,27 @@ def resolve_compile_flags(compile_flags):
             "Unknown compile_flags: %s (want %s)" % (compile_flags, ", ".join(PRESETS))
         )
     return [dict(p) for p in PRESETS[key]]
+
+
+def bump_glsl_binding_version(source, encoding="glsl"):
+    """OpenGL custom shaders: layout(binding=N) needs GLSL 420.
+
+    RenderDoc's custom-shader wrapper injects a binding qualifier. Source
+    at #version 330 then fails with C7532. Bump only when encoding is glsl,
+    the first line is #version < 420, and the body already uses layout+binding.
+    """
+    if (encoding or "").lower() != "glsl" or not source:
+        return source
+    src = source.lstrip()
+    if not src.startswith("#version"):
+        return source
+    if "layout" not in source or "binding" not in source:
+        return source
+    first = src.splitlines()[0]
+    ver = first.replace("#version", "").strip().split()[0]
+    try:
+        if int(ver) < 420:
+            return source.replace(first, "#version 420", 1)
+    except Exception:
+        return source
+    return source
