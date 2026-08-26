@@ -96,7 +96,7 @@
   <div class="readout" id="atlasReadout"></div>
   <canvas id="atlasCv" width="860" height="430"></canvas>
   <canvas id="zoomCv" width="512" height="256" style="margin-top:8px"></canvas>
-  <div style="font-size:12px;color:var(--dim);margin-top:4px">下图是上图的中心区域放大 4×。白线框出的每个小块 = <b>一个探针</b>，块内是它的 <code>probeSize×probeSize</code> 个方向（每个方向一个 texel）。C0 的块最小最密（2×2=4 方向），C5 的块最大最疏（64×64=4096 方向）。</div>
+  <div style="font-size:12px;color:var(--dim);margin-top:4px">下图是上图中<b>红框</b>区域的放大。白线框出的每个小块 = <b>一个探针</b>，块内是它的 <code>probeSize×probeSize</code> 个方向（每个方向一个 texel）。C0 的块最小最密（2×2=4 方向），C5 的块最大最疏（64×64=4096 方向）。<b>拖拽主图移动红框、滚轮缩放</b>，可以扒到任意区域的探针。</div>
   <div class="legend">
     <span><span class="dot" style="background:#181a22"></span>α=0：天空 / 没打中（−1 哨兵）</span>
     <span><span class="dot" style="background:#3fb950"></span>α 小：打中近处</span>
@@ -370,37 +370,67 @@ function updateAtlasReadout(){
     (atlasState.c === 5 ? ' · <span style="color:#f85149">C5 最疏最远，是「看全景」的那一级</span>' : atlasState.c === 0 ? ' · <span style="color:#3fb950">C0 最密最近，是「看细节」的那一级</span>' : '');
 }
 
+// 放大区域：原图 texel 坐标，初始 = 中心 128×64。拖拽主图移动、滚轮缩放。
+const zoomState = { sx: 512 - 64, sy: 256 - 32, w: 128, h: 64 };
+function clampV(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
 function drawAtlas(){
   const img = atlasImgs[atlasState.c + '-' + atlasState.view];
   if (!img.complete){ img.onload = drawAtlas; return; }
   const c = atlasState.c;
   const probeSize = ATLAS_STATS[c].ps;      // 原始 texel
   const dw = 860, dh = 430;                  // 显示尺寸（1024×512 → 860×430，保持 2:1）
-  const scale = dw / 1024;
+  const scaleX = dw / 1024, scaleY = dh / 512;
 
-  // 主画布：整张 atlas + probe 网格
+  // 主画布：整张 atlas + probe 网格 + 红框（当前放大区域）
   atlasCtx.clearRect(0,0,dw,dh);
   atlasCtx.fillStyle = '#04060a'; atlasCtx.fillRect(0,0,dw,dh);
   atlasCtx.drawImage(img, 0, 0, dw, dh);
-  const cell = probeSize * scale;
-  if (cell >= 2){
-    atlasCtx.strokeStyle = 'rgba(255,255,255,0.22)'; atlasCtx.lineWidth = 1;
-    for (let x = 0; x <= dw; x += cell){ atlasCtx.beginPath(); atlasCtx.moveTo(x,0); atlasCtx.lineTo(x,dh); atlasCtx.stroke(); }
-    for (let y = 0; y <= dh; y += cell){ atlasCtx.beginPath(); atlasCtx.moveTo(0,y); atlasCtx.lineTo(dw,y); atlasCtx.stroke(); }
+  const cellX = probeSize * scaleX, cellY = probeSize * scaleY;
+  if (cellX >= 2 && cellY >= 2){
+    atlasCtx.strokeStyle = 'rgba(255,255,255,0.18)'; atlasCtx.lineWidth = 1;
+    for (let x = 0; x <= dw; x += cellX){ atlasCtx.beginPath(); atlasCtx.moveTo(x,0); atlasCtx.lineTo(x,dh); atlasCtx.stroke(); }
+    for (let y = 0; y <= dh; y += cellY){ atlasCtx.beginPath(); atlasCtx.moveTo(0,y); atlasCtx.lineTo(dw,y); atlasCtx.stroke(); }
   }
+  // 红框 = 下图放大的区域
+  atlasCtx.strokeStyle = 'rgba(255,90,90,0.95)'; atlasCtx.lineWidth = 2;
+  atlasCtx.strokeRect(zoomState.sx*scaleX, zoomState.sy*scaleY, zoomState.w*scaleX, zoomState.h*scaleY);
 
-  // 放大画布：中心 128×64 texel 放大 4×，框出 probe 块
+  // 放大画布：zoomState 区域 → 512×256
   zoomCtx.clearRect(0,0,512,256);
   zoomCtx.fillStyle = '#04060a'; zoomCtx.fillRect(0,0,512,256);
-  const sx = 512 - 64, sy = 256 - 32;  // 中心裁剪
-  zoomCtx.drawImage(img, sx, sy, 128, 64, 0, 0, 512, 256);
-  const zcell = probeSize * 4;
+  zoomCtx.drawImage(img, zoomState.sx, zoomState.sy, zoomState.w, zoomState.h, 0, 0, 512, 256);
+  const zcellX = probeSize * (512 / zoomState.w), zcellY = probeSize * (256 / zoomState.h);
   zoomCtx.strokeStyle = 'rgba(255,255,255,0.55)'; zoomCtx.lineWidth = 1;
-  for (let x = 0; x <= 512; x += zcell){ zoomCtx.beginPath(); zoomCtx.moveTo(x,0); zoomCtx.lineTo(x,256); zoomCtx.stroke(); }
-  for (let y = 0; y <= 256; y += zcell){ zoomCtx.beginPath(); zoomCtx.moveTo(0,y); zoomCtx.lineTo(512,y); zoomCtx.stroke(); }
+  for (let x = 0; x <= 512; x += zcellX){ zoomCtx.beginPath(); zoomCtx.moveTo(x,0); zoomCtx.lineTo(x,256); zoomCtx.stroke(); }
+  for (let y = 0; y <= 256; y += zcellY){ zoomCtx.beginPath(); zoomCtx.moveTo(0,y); zoomCtx.lineTo(512,y); zoomCtx.stroke(); }
 
   updateAtlasReadout();
 }
+
+// 拖拽移动红框 / 滚轮缩放
+let dragging = false;
+function recenterAtlas(clientX, clientY){
+  const rect = atlasCv.getBoundingClientRect();
+  const tx = (clientX - rect.left) / rect.width * 1024;
+  const ty = (clientY - rect.top) / rect.height * 512;
+  zoomState.sx = clampV(tx - zoomState.w/2, 0, 1024 - zoomState.w);
+  zoomState.sy = clampV(ty - zoomState.h/2, 0, 512 - zoomState.h);
+  drawAtlas();
+}
+atlasCv.addEventListener('mousedown', e => { dragging = true; recenterAtlas(e.clientX, e.clientY); });
+atlasCv.addEventListener('mousemove', e => { if (dragging) recenterAtlas(e.clientX, e.clientY); });
+window.addEventListener('mouseup', () => { dragging = false; });
+atlasCv.addEventListener('wheel', e => {
+  e.preventDefault();
+  const f = e.deltaY < 0 ? 0.75 : 1.33;
+  const nw = clampV(zoomState.w * f, 16, 512);
+  const nh = clampV(zoomState.h * f, 16, 256);
+  zoomState.sx = clampV(zoomState.sx - (nw - zoomState.w)/2, 0, 1024 - nw);
+  zoomState.sy = clampV(zoomState.sy - (nh - zoomState.h)/2, 0, 512 - nh);
+  zoomState.w = nw; zoomState.h = nh;
+  drawAtlas();
+}, { passive: false });
 
 document.getElementById('atlasCascade').addEventListener('input', e => { atlasState.c = +e.target.value; drawAtlas(); });
 document.querySelectorAll('input[name=atlasView]').forEach(r => r.addEventListener('change', e => {

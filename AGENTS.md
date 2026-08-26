@@ -10,6 +10,7 @@ Reusable workflows for this repo live in `.kilo/skills/`:
 - `renderdoc-shader-fix` — closed-loop shader edit/replace/replay/verify.
 - `renderdoc-extension` — safely modify the RenderDoc Python 3.6 extension.
 - `renderdoc-debug` — living debug protocol (seed at `seed-protocol.json`).
+- `renderdoc-interactive-visualizer` — single-file interactive HTML visualization of an algorithm from a capture (real data + concept + pan/zoom).
 
 Use these skills for multi-step RenderDoc work; use direct tool calls only for one-off reads.
 
