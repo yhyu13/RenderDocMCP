@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radiance Cascades 交互式可视化</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#e6edf3; --dim:#8b949e;
+          --accent:#58a6ff; --green:#3fb950; --red:#f85149; --yellow:#d29922; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:"Segoe UI","Microsoft YaHei",sans-serif; line-height:1.6; }
+  header { padding:28px 24px 12px; max-width:920px; margin:0 auto; }
+  header h1 { margin:0 0 8px; font-size:26px; }
+  header p { color:var(--dim); margin:4px 0; }
+  section { max-width:920px; margin:0 auto; padding:18px 24px; }
+  h2 { font-size:20px; border-bottom:1px solid var(--line); padding-bottom:8px; }
+  .controls { display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin:12px 0; }
+  .controls label { display:flex; align-items:center; gap:6px; font-size:14px; color:var(--text); cursor:pointer; }
+  input[type=range] { width:180px; }
+  .readout { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px 14px; font-size:14px; margin:8px 0 12px; font-family:Consolas,monospace; }
+  .readout b { color:var(--accent); }
+  canvas { width:100%; height:auto; border:1px solid var(--line); border-radius:8px; background:#000; display:block; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; font-size:13px; color:var(--dim); margin-top:8px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .steps { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+  .steps button { background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:8px 14px; cursor:pointer; font-size:14px; }
+  .steps button.active { border-color:var(--accent); background:#1c2c40; color:var(--accent); }
+  .step-panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-top:8px; }
+  .step-panel .io { color:var(--dim); font-size:13px; margin-top:6px; }
+  .step-panel .meta { color:var(--green); font-size:13px; }
+  table { border-collapse:collapse; width:100%; font-size:14px; margin-top:10px; }
+  th,td { border:1px solid var(--line); padding:8px 10px; text-align:center; }
+  th { background:var(--panel); }
+  td.num { font-family:Consolas,monospace; color:var(--accent); }
+  .hl { color:var(--yellow); font-weight:bold; }
+  footer { max-width:920px; margin:0 auto; padding:20px 24px 40px; color:var(--dim); font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Radiance Cascades 交互式可视化</h1>
+  <p>配套《逆向 Radiance Cascades》一文。三个概念：<b>空间密度</b>（探针多密）、<b>角密度</b>（每个探针打多少条射线）、<b>merge</b>（粗级把远处的光递给细级）。</p>
+  <p>数据全部对齐 shader 源码：<code>probeSize = 2^(cascade+1)</code>、<code>探针数 = gRes/probeSize</code>、<code>射线长度 = probeSize×8×texelScale</code>。</p>
+</header>
+
+<section>
+  <h2>① 空间密度 vs 角密度（拖动级联看权衡）</h2>
+  <div class="controls">
+    <label>级联 <input type="range" id="cascade" min="0" max="5" value="2"> <b id="cascadeLabel">C2</b></label>
+    <label><input type="checkbox" id="showRays" checked> 显示射线</label>
+    <label><input type="checkbox" id="showProbes" checked> 显示探针</label>
+    <label><input type="checkbox" id="mergeToggle" checked> merge 接力</label>
+    <label><input type="checkbox" id="animate"> 动画</label>
+  </div>
+  <div class="readout" id="readout"></div>
+  <canvas id="cv" width="860" height="560"></canvas>
+  <div class="legend">
+    <span><span class="dot" style="background:#ffd76a"></span>光源（面光，产生半影）</span>
+    <span><span class="dot" style="background:#888"></span>遮挡物（墙）</span>
+    <span><span class="dot" style="background:#3fb950"></span>探针（亮度 = 打到的光）</span>
+    <span><span class="dot" style="background:#d29922"></span>射线（长度 = 本级射线长度）</span>
+    <span><span class="dot" style="background:#58a6ff"></span>merge 接力箭头</span>
+  </div>
+</section>
+
+<section>
+  <h2>② 五步流水线：这一步到底在干什么</h2>
+  <div class="steps">
+    <button data-step="0" class="active">① decodeProbe</button>
+    <button data-step="1">② traceScene</button>
+    <button data-step="2">③ shadeLocal</button>
+    <button data-step="3">④ mergeUpper</button>
+    <button data-step="4">⑤ imageStore</button>
+  </div>
+  <div class="step-panel" id="stepPanel"></div>
+</section>
+
+<section>
+  <h2>③ 半影假设：近处要空间，远处要角度</h2>
+  <p style="color:var(--dim)">一个阴影的半影，靠近遮挡物需要空间分辨率高（探针密），远离遮挡物需要角分辨率高（射线多）。两者成反比，所以级联每上一级：探针 ÷4、射线 ×4。</p>
+  <table id="cascadeTable">
+    <thead><tr><th>级联</th><th>probeSize</th><th>探针数（空间）</th><th>每探针射线（角度）</th><th>射线长度</th></tr></thead>
+    <tbody></tbody>
+  </table>
+  <p style="color:var(--dim); font-size:13px">C0 探针最密、射线最短（只够看贴着的近处）；C5 探针最疏、射线无限长（看最远）。merge 把 C5 看到的远处光一层层递给 C0——这就是「用有限射线模拟无限方向」。</p>
+</section>
+
+<footer>单文件、零依赖。数据语义对齐 <code>reference_transport.comp</code>（decodeProbe / traceScene / shadeLocal / mergeUpper）。</footer>
+
+<script>
+"use strict";
+// ---------- 场景（对齐 parity Cornell 的 1×0.5×1 房间，2D 俯视取 1×1） ----------
+const LIGHT = { x: 0.5, y: 0.22, r: 0.075 };      // 面光源（圆盘）→ 半影
+const OCC   = { x: 0.30, y: 0.52, w: 0.40, h: 0.045 }; // 遮挡物（横条）
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+
+// 世界 [0,1]^2 -> 画布。留边距。
+const pad = 30, sx = W - pad*2, sy = H - pad*2;
+function wx(x){ return pad + x*sx; }
+function wy(y){ return pad + y*sy; }
+
+// ---------- 级联参数（对齐源码） ----------
+const CASCADES = 6;
+function probeSizeOf(c){ return Math.pow(2, c+1); }              // 2^(c+1)
+function probesAcross(c){ return Math.round(64 / Math.pow(2, c)); } // 空间密度：每轴探针数
+function raysPerProbe(c){ return Math.pow(2, c); }               // 角密度：每探针射线数
+function intervalOf(c){ return probeSizeOf(c) * 8 / 256; }       // 射线长度 = probeSize*8*texelScale
+function intervalLabel(c){
+  if (c === 5) return '∞ (10000)';
+  return intervalOf(c).toFixed(3);
+}
+
+// ---------- 射线行进 ----------
+function castRay(px, py, angle, maxDist){
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  const steps = 160;
+  for (let s = 1; s <= steps; s++){
+    const t = (s / steps) * maxDist;
+    const x = px + dx * t, y = py + dy * t;
+    // 面光源
+    const ldx = x - LIGHT.x, ldy = y - LIGHT.y;
+    if (ldx*ldx + ldy*ldy < LIGHT.r*LIGHT.r) return 1; // light
+    // 遮挡物
+    if (x >= OCC.x && x <= OCC.x + OCC.w && y >= OCC.y && y <= OCC.y + OCC.h) return 2; // occluder
+  }
+  return 0; // sky
+}
+
+// 某一级：计算探针网格的辐照（radiance）+ 是否命中（hit）
+function renderCascade(c){
+  const n = probesAcross(c);
+  const grid = new Array(n);
+  const spacing = 1 / n;
+  const nRays = raysPerProbe(c);
+  const interval = (c === 5) ? 1.5 : intervalOf(c); // C5 射线盖满全场
+  for (let i = 0; i < n; i++){
+    grid[i] = new Array(n);
+    const px = (i + 0.5) * spacing;
+    for (let j = 0; j < n; j++){
+      const py = (j + 0.5) * spacing;
+      let lit = 0;
+      for (let r = 0; r < nRays; r++){
+        const a = (r / nRays) * Math.PI * 2;
+        if (castRay(px, py, a, interval) === 1) lit++;
+      }
+      const rad = lit / nRays;
+      grid[i][j] = { rad, hit: rad > 0 };
+    }
+  }
+  return grid;
+}
+
+// ---------- 渲染 ----------
+let cascade = 2;
+const state = { showRays:true, showProbes:true, merge:true, animate:false };
+
+function render(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = '#04060a'; ctx.fillRect(0,0,W,H);
+
+  // 场景
+  // 遮挡物
+  ctx.fillStyle = '#888';
+  ctx.fillRect(wx(OCC.x), wy(OCC.y), OCC.w*sx, OCC.h*sy);
+  // 光源
+  const g = ctx.createRadialGradient(wx(LIGHT.x), wy(LIGHT.y), 0, wx(LIGHT.x), wy(LIGHT.y), LIGHT.r*sx);
+  g.addColorStop(0, '#fff8d6'); g.addColorStop(1, '#d29922');
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(wx(LIGHT.x), wy(LIGHT.y), LIGHT.r*sx, 0, Math.PI*2); ctx.fill();
+
+  const c = cascade;
+  const n = probesAcross(c);
+  const spacing = 1/n;
+  const nRays = raysPerProbe(c);
+  const interval = (c === 5) ? 1.5 : intervalOf(c);
+  const grid = renderCascade(c);
+
+  // 射线
+  if (state.showRays){
+    ctx.strokeStyle = 'rgba(210,153,34,0.35)'; ctx.lineWidth = 1;
+    const step = Math.max(1, Math.round(n / 14)); // 太多就抽样画
+    for (let i = 0; i < n; i += step){
+      for (let j = 0; j < n; j += step){
+        const px = (i + 0.5) * spacing, py = (j + 0.5) * spacing;
+        for (let r = 0; r < nRays; r++){
+          const a = (r / nRays) * Math.PI * 2;
+          const endx = px + Math.cos(a)*interval, endy = py + Math.sin(a)*interval;
+          ctx.beginPath(); ctx.moveTo(wx(px), wy(py)); ctx.lineTo(wx(endx), wy(endy)); ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // merge 接力箭头
+  if (state.merge && c > 0){
+    ctx.strokeStyle = 'rgba(88,166,255,0.8)'; ctx.lineWidth = 2;
+    ctx.setLineDash([5,4]);
+    const nc = probesAcross(c), sp = 1/nc;
+    const nu = probesAcross(c-1), spu = 1/nu;
+    for (let i = 0; i < nu; i++){
+      for (let j = 0; j < nu; j++){
+        // 细级探针位置
+        const fx = (i + 0.5)*spu, fy = (j + 0.5)*spu;
+        // 对应的粗级探针（上一层 = c-1，更密的那层指向上一级更粗）
+        const cx = (Math.floor(i/2) + 0.5)*sp, cy = (Math.floor(j/2) + 0.5)*sp;
+        ctx.beginPath(); ctx.moveTo(wx(cx), wy(cy)); ctx.lineTo(wx(fx), wy(fy)); ctx.stroke();
+      }
+    }
+    ctx.setLineDash([]);
+  }
+
+  // 探针（颜色 = 辐照）
+  if (state.showProbes){
+    for (let i = 0; i < n; i++){
+      for (let j = 0; j < n; j++){
+        const v = grid[i][j].rad;
+        const px = (i + 0.5)*spacing, py = (j + 0.5)*spacing;
+        // 亮度：hit 的显示黄→白，miss 显示暗红
+        if (grid[i][j].hit){
+          const lum = Math.round(80 + 175*Math.min(1, v*3));
+          ctx.fillStyle = `rgb(${Math.min(255, lum+40)},${lum},${Math.round(lum*0.55)})`;
+        } else {
+          ctx.fillStyle = 'rgba(80,40,40,0.7)';
+        }
+        const r = Math.max(2.5, 9 - c*1.2);
+        ctx.beginPath(); ctx.arc(wx(px), wy(py), r, 0, Math.PI*2); ctx.fill();
+      }
+    }
+  }
+
+  // 读条
+  updateReadout();
+}
+
+function updateReadout(){
+  const c = cascade;
+  const n = probesAcross(c);
+  const r = raysPerProbe(c);
+  const iv = intervalLabel(c);
+  document.getElementById('cascadeLabel').textContent = 'C' + c;
+  document.getElementById('readout').innerHTML =
+    `级联 <b>C${c}</b> · probeSize = 2^${c+1} = <b>${probeSizeOf(c)}</b> · ` +
+    `探针数(空间密度) = <b>${n}×${n}</b> = ${n*n} · ` +
+    `每探针射线(角密度) = <b>${r}</b> · 射线长度 = <b>${iv}</b>` +
+    (state.merge && c > 0 ? ' · <span style="color:#58a6ff">merge 开（粗级接力）</span>' : '');
+}
+
+// ---------- 控件 ----------
+document.getElementById('cascade').addEventListener('input', e => {
+  cascade = +e.target.value; render();
+});
+document.getElementById('showRays').addEventListener('change', e => { state.showRays = e.target.checked; render(); });
+document.getElementById('showProbes').addEventListener('change', e => { state.showProbes = e.target.checked; render(); });
+document.getElementById('mergeToggle').addEventListener('change', e => { state.merge = e.target.checked; render(); });
+document.getElementById('animate').addEventListener('change', e => { state.animate = e.target.checked; });
+
+// 动画：缓缓扫射线角度
+let t = 0;
+function loop(){
+  if (state.animate){ t += 0.02; render(); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---------- 级联参数表 ----------
+(function(){
+  const tb = document.querySelector('#cascadeTable tbody');
+  for (let c = 0; c < CASCADES; c++){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>C${c}${c===0?'（最细）':c===5?'（最粗）':''}</td>` +
+      `<td class="num">${probeSizeOf(c)}</td>` +
+      `<td class="num">${probesAcross(c)}×${probesAcross(c)} = ${probesAcross(c)*probesAcross(c)}</td>` +
+      `<td class="num">${raysPerProbe(c)}</td>` +
+      `<td class="num">${intervalLabel(c)}</td>`;
+    tb.appendChild(tr);
+  }
+})();
+
+// ---------- 五步流水线 ----------
+const STEPS = [
+  { t:'① decodeProbe —— 把 texel 解成探针',
+    d:'atlas 是按「探针 × 方向」排格的底片。这一步拿一个 texel 坐标，反查它是哪个探针、朝哪个方向、角分辨率多大、射线多长。',
+    meta:'probeCascade = floor(uv.y/256)；probeSize = 2^(c+1)；tInterval = probeSize×8×texelScale',
+    io:'输入：texel 坐标 uv。输出：探针（位置 + 方向 + probeSize + interval）。' },
+  { t:'② traceScene —— 从探针往外打一条线',
+    d:'有了位置和方向，朝这个方向打射线，遍历 13 个图元（面片/圆柱/镜面球/盒），返回最近的命中。',
+    meta:'for (i<13) { kind = primitives[i].metadata.y; 四种求交 }',
+    io:'输入：射线 (origin, dir, maxt)。输出：TraceHit（距离 t + 法线 + 材质）。' },
+  { t:'③ shadeLocal —— 把打到的结果洗成颜色，α 记距离',
+    d:'命中就把首击距离写进 α，没命中写 −1；颜色 = 发射 或 (弹射+直射)×响应×权重。α 是量尺，后面 merge 拿它做锥形可见性。',
+    meta:'if(!h.hit) alpha=-1; else alpha=h.t;',
+    io:'输入：TraceHit + 探针方向。输出：(rgb×w, α)。' },
+  { t:'④ mergeUpper —— 粗级把远处的光递给细级',
+    d:'细级射线短、够不到远处；粗级射线长、看得到远处。这一步读上一级 4 个双线性探针，用距离做锥形可见性（防穿墙漏光），按距离融合。',
+    meta:'visible = dist < -0.5 || length(rel) < dist×cone；localRgb×l + upper×(1-l)',
+    io:'输入：本级结果 + 上级 atlas。输出：融合后的颜色。' },
+  { t:'⑤ imageStore —— 写回本级 atlas',
+    d:'把 (rgb, α) 写进本级 atlas 的这一格。本级算完，再被更细的一级 merge 读走。',
+    meta:'imageStore(uBandImage, texel, vec4(rgb, payload.a))',
+    io:'输入：颜色 + 探针坐标。输出：本级 atlas 的一格。' }
+];
+const stepBtns = document.querySelectorAll('.steps button');
+const stepPanel = document.getElementById('stepPanel');
+function showStep(i){
+  stepBtns.forEach((b, k) => b.classList.toggle('active', k === i));
+  const s = STEPS[i];
+  stepPanel.innerHTML = `<h3 style="margin:0 0 8px">${s.t}</h3><p style="margin:0 0 8px">${s.d}</p>` +
+    `<div class="meta">源码：${s.meta}</div><div class="io">${s.io}</div>`;
+}
+stepBtns.forEach(b => b.addEventListener('click', () => showStep(+b.dataset.step)));
+showStep(0);
+
+render();
+</script>
+</body>
+</html>
