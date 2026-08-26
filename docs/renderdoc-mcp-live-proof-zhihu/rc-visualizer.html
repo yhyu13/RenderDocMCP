@@ -85,7 +85,27 @@
   <p style="color:var(--dim); font-size:13px">C0 探针最密、射线最短（只够看贴着的近处）；C5 探针最疏、射线无限长（看最远）。merge 把 C5 看到的远处光一层层递给 C0——这就是「用有限射线模拟无限方向」。</p>
 </section>
 
-<footer>单文件、零依赖。数据语义对齐 <code>reference_transport.comp</code>（decodeProbe / traceScene / shadeLocal / mergeUpper）。</footer>
+<section>
+  <h2>④ 真实 atlas：每层 probe（来自 .rdc）</h2>
+  <p>下面六张是真从 <code>new_rc_split_frame24.rdc</code> 导出的 atlas（1024×512 <code>RGBA32F</code>）。<b>切「距离 α」看探针 trace 到了什么</b>——α 就是 shadeLocal 写的「首击距离」，−1（没打中）显示成深色；<b>切「辐照 RGB」看探针看到了多少光</b>。</p>
+  <div class="controls">
+    <label>级联 <input type="range" id="atlasCascade" min="0" max="5" value="0"> <b id="atlasCascadeLabel">C0</b></label>
+    <label><input type="radio" name="atlasView" value="alpha" checked> 距离 α（trace 结果）</label>
+    <label><input type="radio" name="atlasView" value="rgb"> 辐照 RGB（光）</label>
+  </div>
+  <div class="readout" id="atlasReadout"></div>
+  <canvas id="atlasCv" width="860" height="430"></canvas>
+  <canvas id="zoomCv" width="512" height="256" style="margin-top:8px"></canvas>
+  <div style="font-size:12px;color:var(--dim);margin-top:4px">下图是上图的中心区域放大 4×。白线框出的每个小块 = <b>一个探针</b>，块内是它的 <code>probeSize×probeSize</code> 个方向（每个方向一个 texel）。C0 的块最小最密（2×2=4 方向），C5 的块最大最疏（64×64=4096 方向）。</div>
+  <div class="legend">
+    <span><span class="dot" style="background:#181a22"></span>α=0：天空 / 没打中（−1 哨兵）</span>
+    <span><span class="dot" style="background:#3fb950"></span>α 小：打中近处</span>
+    <span><span class="dot" style="background:#e6b400"></span>α 大：打中远处</span>
+    <span><span class="dot" style="background:#f85149"></span>α 最大：C5 打到最远（1.38）</span>
+  </div>
+</section>
+
+<footer>数据语义对齐 <code>reference_transport.comp</code>（decodeProbe / traceScene / shadeLocal / mergeUpper）。atlas 图来自 <code>new_rc_split_frame24.rdc</code> 的真实导出。</footer>
 
 <script>
 "use strict";
@@ -314,6 +334,83 @@ stepBtns.forEach(b => b.addEventListener('click', () => showStep(+b.dataset.step
 showStep(0);
 
 render();
+
+// ---------- ④ 真实 atlas ----------
+const ATLAS_STATS = [
+  { ps: 2,  probes: '512×256', dirs: 4,    rgbMax: 0.50,  aMax: 0.062 },
+  { ps: 4,  probes: '256×128', dirs: 16,   rgbMax: 0.23,  aMax: 0.125 },
+  { ps: 8,  probes: '128×64',  dirs: 64,   rgbMax: 0.06,  aMax: 0.25  },
+  { ps: 16, probes: '64×32',   dirs: 256,  rgbMax: 0.015, aMax: 0.50  },
+  { ps: 32, probes: '32×16',   dirs: 1024, rgbMax: 0.004, aMax: 1.0   },
+  { ps: 64, probes: '16×8',    dirs: 4096, rgbMax: 0.001, aMax: 1.38  }
+];
+const atlasImgs = {};
+(function loadAtlas(){
+  for (let c = 0; c < 6; c++){
+    for (const v of ['rgb', 'alpha']){
+      atlasImgs[c + '-' + v] = new Image();
+      atlasImgs[c + '-' + v].src = 'images/atlas/c' + c + '-' + v + '.png';
+    }
+  }
+})();
+
+const atlasCv = document.getElementById('atlasCv');
+const atlasCtx = atlasCv.getContext('2d');
+const zoomCv = document.getElementById('zoomCv');
+const zoomCtx = zoomCv.getContext('2d');
+const atlasState = { c: 0, view: 'alpha' };
+
+function updateAtlasReadout(){
+  const s = ATLAS_STATS[atlasState.c];
+  document.getElementById('atlasCascadeLabel').textContent = 'C' + atlasState.c;
+  document.getElementById('atlasReadout').innerHTML =
+    `级联 <b>C${atlasState.c}</b> · probeSize = <b>${s.ps}</b> · 探针网格 = <b>${s.probes}</b> = ${s.ps===2?512*256:s.ps===4?256*128:s.ps===8?128*64:s.ps===16?64*32:s.ps===32?32*16:16*8} 个探针 · ` +
+    `每探针方向 = <b>${s.dirs}</b> · ` +
+    `辐照 RGB max = <b>${s.rgbMax}</b> · 距离 α max = <b>${s.aMax}</b>` +
+    (atlasState.c === 5 ? ' · <span style="color:#f85149">C5 最疏最远，是「看全景」的那一级</span>' : atlasState.c === 0 ? ' · <span style="color:#3fb950">C0 最密最近，是「看细节」的那一级</span>' : '');
+}
+
+function drawAtlas(){
+  const img = atlasImgs[atlasState.c + '-' + atlasState.view];
+  if (!img.complete){ img.onload = drawAtlas; return; }
+  const c = atlasState.c;
+  const probeSize = ATLAS_STATS[c].ps;      // 原始 texel
+  const dw = 860, dh = 430;                  // 显示尺寸（1024×512 → 860×430，保持 2:1）
+  const scale = dw / 1024;
+
+  // 主画布：整张 atlas + probe 网格
+  atlasCtx.clearRect(0,0,dw,dh);
+  atlasCtx.fillStyle = '#04060a'; atlasCtx.fillRect(0,0,dw,dh);
+  atlasCtx.drawImage(img, 0, 0, dw, dh);
+  const cell = probeSize * scale;
+  if (cell >= 2){
+    atlasCtx.strokeStyle = 'rgba(255,255,255,0.22)'; atlasCtx.lineWidth = 1;
+    for (let x = 0; x <= dw; x += cell){ atlasCtx.beginPath(); atlasCtx.moveTo(x,0); atlasCtx.lineTo(x,dh); atlasCtx.stroke(); }
+    for (let y = 0; y <= dh; y += cell){ atlasCtx.beginPath(); atlasCtx.moveTo(0,y); atlasCtx.lineTo(dw,y); atlasCtx.stroke(); }
+  }
+
+  // 放大画布：中心 128×64 texel 放大 4×，框出 probe 块
+  zoomCtx.clearRect(0,0,512,256);
+  zoomCtx.fillStyle = '#04060a'; zoomCtx.fillRect(0,0,512,256);
+  const sx = 512 - 64, sy = 256 - 32;  // 中心裁剪
+  zoomCtx.drawImage(img, sx, sy, 128, 64, 0, 0, 512, 256);
+  const zcell = probeSize * 4;
+  zoomCtx.strokeStyle = 'rgba(255,255,255,0.55)'; zoomCtx.lineWidth = 1;
+  for (let x = 0; x <= 512; x += zcell){ zoomCtx.beginPath(); zoomCtx.moveTo(x,0); zoomCtx.lineTo(x,256); zoomCtx.stroke(); }
+  for (let y = 0; y <= 256; y += zcell){ zoomCtx.beginPath(); zoomCtx.moveTo(0,y); zoomCtx.lineTo(512,y); zoomCtx.stroke(); }
+
+  updateAtlasReadout();
+}
+
+document.getElementById('atlasCascade').addEventListener('input', e => { atlasState.c = +e.target.value; drawAtlas(); });
+document.querySelectorAll('input[name=atlasView]').forEach(r => r.addEventListener('change', e => {
+  if (e.target.checked){ atlasState.view = e.target.value; drawAtlas(); }
+}));
+
+// 图片全部就绪后首次绘制
+let atlasReady = 0;
+for (const k in atlasImgs){ atlasImgs[k].onload = () => { atlasReady++; if (atlasReady >= 12) drawAtlas(); }; }
+setTimeout(() => drawAtlas(), 800);
 </script>
 </body>
 </html>
