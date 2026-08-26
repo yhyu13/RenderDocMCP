@@ -486,6 +486,12 @@ void main() {
 }
 ```
 
+shader 打射线读的场景，全在这个 2368 字节的 SSBO 里。`export_buffer` 把它导出来，逐字段解出：
+
+![SceneData：13 个图元 + 8 种材质 + 太阳/天空，从 buffer 字节解出](images/scene-data.png)
+
+这份「场景契约」就是后面每根枝的输入——`traceScene` 遍历的 13 个图元、`shadeLocal` 取色的 8 种材质，都在这里。不是猜的，是 shader 读的那份字节。
+
 ## 按枝往下讲
 
 下面顺着「追数据流」这条线，六根枝一根根拆。每根枝：一段人话 → 是什么/不是什么 → 代码片段 → 一张图。
@@ -540,6 +546,12 @@ if (!h.hit) {
 
 ![shadeLocal：hit → (rgb, α)；α 是量尺，miss 记 −1](images/08-shade-local.png)
 
+这个 α 通道，直接从四张真实 atlas 里读出来，就是下面这张「trace 层级」：
+
+![trace 层级：α（首击距离）按级联从近到远——C0 几乎全天空，C5 打到最远](images/trace-hierarchy.png)
+
+C0 的射线只有 0.0625 单位长，α 几乎全是深色（没打中）；C5 的射线无限长，满屏黄红（打到了最远）。「细级看近处、粗级看远处」不是口号，是这六张 α 图。
+
 ### 枝 5：mergeUpper——粗级把远处的光递给细级
 
 流水线最妙的一站。细级射线短（C0 只有 0.0625 单位），够不到远处的墙；粗级射线长（C5 是 10000），看得到远处。merge 就是「粗级把远处看到的光，递给细级」，一层层递到 C0。
@@ -557,6 +569,16 @@ return localRgb*l + upper*(1.0 - l);
 **是什么**：接力赛——粗级看远了把棒交给细级，看不到（有墙）就不交。**不是什么**：不是把粗级的颜色直接糊上来。
 
 ![mergeUpper：粗级递光给细级，锥形可见性防穿墙漏光](images/09-merge-upper.png)
+
+merge 搬的是 RGB（颜色），α（距离）不动。看辐照层级：
+
+![RGB 层级：辐照按级联从亮到暗——C0 最亮，C5 全黑](images/rgb-hierarchy.png)
+
+最直接的验证，是改一行 shader 重放——把 `mergeUpper` 那一块删掉，同一帧、同一相机：
+
+![改一行 shader 重放：merge 开 vs 关](images/merge-on-off.png)
+
+merge 开：C0 收到粗级递来的远处光，画面正常。merge 关：C0 只剩自己的短射线，够不到墙，全是天空兜底，整帧曝白。
 
 ### 枝 6：feedbackB + shadeFinalView——消费 C0 画到屏上
 
