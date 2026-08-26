@@ -18,6 +18,8 @@ MCP 干的是后者：它从一帧 `.rdc` 里，把 shader 源码、管线结构
 
 ![验证哪条能力：能不能像专家一样，把一门竞品算法从捕获里读出来、讲清楚](images/01-why.png)
 
+图 1：验证的三条能力——拿出整条管线、像专家逐函数分析、教会别人，三件都压在一个对象上。
+
 这篇验证三条能力：能不能拿出整条管线、能不能像专家一样逐函数分析、能不能把算法讲清楚教给别人。三件都压在一个对象上——Radiance Cascades。
 
 ## 错路对照
@@ -29,6 +31,8 @@ MCP 干的是后者：它从一帧 `.rdc` 里，把 shader 源码、管线结构
 **正路：源码 + 捕获对账。** 打开 `.rdc`，回放到 event，导纹理和 buffer，把数字和源码对一遍。两样对上，才算读懂。
 
 ![错路只读源码，正路源码 + 捕获对账](images/02-wrong-right.png)
+
+图 2：只读源码会踩两个坑；正路是源码 + 捕获对账。
 
 这一篇的主线就落在这里：**读懂 = 源码和捕获对得上。** 下面每一步都留真文件。
 
@@ -44,6 +48,8 @@ MCP 干的是后者：它从一帧 `.rdc` 里，把 shader 源码、管线结构
 
 ![脉络：需求 → 接缝 → 树根 → 主干 → 切开](images/03-thread.png)
 
+图 3：追着数据流走——从入口 main() 到五步流水线，逐函数切开问。
+
 ## 树全貌：整条管线 + 完整源码
 
 `get_frame_summary` 读出的帧结构，一句话：这一帧是 6 级级联，从最粗的 C5 传到最细的 C0，最后消费一次画到屏上。
@@ -51,6 +57,8 @@ MCP 干的是后者：它从一帧 `.rdc` 里，把 shader 源码、管线结构
 7 个顶层 marker——`reference_transport.C5` 到 `C0`，再加 `reference_final`。13 次 `glDispatchCompute`，2 次 `glDrawElements`，12 张纹理，6 个 buffer。
 
 ![一帧 = 6 级级联 C5→C0 + 1 次最终消费；13 次 dispatch 全用同一个 shader](images/04-pipeline.png)
+
+图 4：一帧就是 6 级级联 + 最终消费，13 次 dispatch 全用同一个 shader。
 
 两个观察点，直接对出「整个管线」：
 
@@ -490,6 +498,8 @@ shader 打射线读的场景，全在这个 2368 字节的 SSBO 里。`export_bu
 
 ![SceneData：13 个图元 + 8 种材质 + 太阳/天空，从 buffer 字节解出](images/scene-data.png)
 
+图 5：场景契约——13 个图元 + 8 种材质 + 太阳/天空，全在 2368 字节里。
+
 这份「场景契约」就是后面每根枝的输入——`traceScene` 遍历的 13 个图元、`shadeLocal` 取色的 8 种材质，都在这里。不是猜的，是 shader 读的那份字节。
 
 ## 按枝往下讲
@@ -498,11 +508,13 @@ shader 打射线读的场景，全在这个 2368 字节的 SSBO 里。`export_bu
 
 ### 枝 1：入口 main()——一个 shader 三种模式
 
-流水线的外壳。`main()` 靠 `uMode` 分三路：0 布局、1 传输、2 最终视图。**每帧真正跑的只有 1 和 2**——1 是 C5→C0 那 12 次传输，2 是最后一次最终视图。0 在生产路径里从不 dispatch：布局（探针位置/方向/权重）在 CPU 侧用 oracle 算好，shader 里的 `uMode=0` 是它的 GPU 镜像，留着和 CPU 做 bit-identical 对账。
+流水线的外壳。`main()` 靠 `uMode` 分三路：0 布局、1 传输、2 最终视图。**每帧 dispatch 的只有 1 和 2**——1 是 C5→C0 那 12 次传输，2 是最后一次最终视图。0 在生产路径里从不 dispatch：布局（探针位置/方向/权重）在 CPU 侧用 oracle 算好，shader 里的 `uMode=0` 是它的 GPU 镜像，留着和 CPU 做 bit-identical 对账。
 
 **是什么**：一个 shader 是三台机器，`uMode` 是旋钮。**不是什么**：不是三个 shader 各管一段。
 
 ![入口：一个 shader 三种模式，uMode=1 是五步流水线](images/05-main-modes.png)
+
+图 6：每帧只跑 uMode=1（12 次）和 uMode=2（1 次）；uMode=0 生产里从不 dispatch。
 
 ### 枝 2：decodeProbe——把 texel 解成探针
 
@@ -520,6 +532,8 @@ float tInterval = probeSize*8.0*texelScale;
 
 ![decodeProbe：texel 坐标 → 探针位置 + 方向 + 角分辨率 + 射线长度](images/06-decode-probe.png)
 
+图 7：查座位表——给 texel 坐标，反查探针位置 / 方向 / 角分辨率 / 射线长度。
+
 ### 枝 3：traceScene——从探针往外打一条线
 
 有了位置和方向，朝这个方向打射线，遍历 13 个图元（面片/圆柱/镜面球/盒），返回最近的命中。
@@ -527,6 +541,8 @@ float tInterval = probeSize*8.0*texelScale;
 **是什么**：手电筒照出去，看光先打到哪面墙、哪个球、哪个盒。**不是什么**：不是一次性把 13 个图元都画一遍。
 
 ![traceScene：一条射线打 13 个图元，四种求交，返回最近的 hit](images/07-trace-scene.png)
+
+图 8：手电筒照出去，打 13 个图元，返回最近的命中。
 
 ### 枝 4：shadeLocal——把打到的结果洗成颜色，α 记距离
 
@@ -546,9 +562,13 @@ if (!h.hit) {
 
 ![shadeLocal：hit → (rgb, α)；α 是量尺，miss 记 −1](images/08-shade-local.png)
 
+图 9：α 是量尺——打中记距离，没打中记 −1。
+
 这个 α 通道，直接从四张真实 atlas 里读出来，就是下面这张「trace 层级」：
 
 ![trace 层级：α（首击距离）按级联从近到远——C0 几乎全天空，C5 打到最远](images/trace-hierarchy.png)
+
+图 10：六张 α 图就是 trace 结果——C0 几乎全天空，C5 打到最远。
 
 C0 的射线只有 0.0625 单位长，α 几乎全是深色（没打中）；C5 的射线无限长，满屏黄红（打到了最远）。「细级看近处、粗级看远处」不是口号，是这六张 α 图。
 
@@ -570,13 +590,19 @@ return localRgb*l + upper*(1.0 - l);
 
 ![mergeUpper：粗级递光给细级，锥形可见性防穿墙漏光](images/09-merge-upper.png)
 
+图 11：接力赛——粗级看远了把棒递给细级，锥形可见性防穿墙漏光。
+
 merge 搬的是 RGB（颜色），α（距离）不动。看辐照层级：
 
 ![RGB 层级：辐照按级联从亮到暗——C0 最亮，C5 全黑](images/rgb-hierarchy.png)
 
+图 12：merge 搬的是 RGB——C0 最亮，C5 全黑。
+
 最直接的验证，是改一行 shader 重放——把 `mergeUpper` 那一块删掉，同一帧、同一相机：
 
 ![改一行 shader 重放：merge 开 vs 关](images/merge-on-off.png)
+
+图 13：删掉 mergeUpper 重放，整帧从正常变曝白。
 
 merge 开：C0 收到粗级递来的远处光，画面正常。merge 关：C0 只剩自己的短射线，够不到墙，全是天空兜底，整帧曝白。
 
@@ -587,6 +613,8 @@ merge 开：C0 收到粗级递来的远处光，画面正常。merge 关：C0 �
 **是什么**：C0 是前台，画屏幕时问前台一句「我这儿的光是多少」。**不是什么**：不是每级 atlas 都问一遍。
 
 ![feedbackB + final：画屏幕时问 C0 一个，就拿到全部辐照](images/10-feedback-final.png)
+
+图 14：C0 是前台，画屏幕时问它一个就够。
 
 ## 合并：把六根枝拼回一条流水线
 
@@ -605,6 +633,8 @@ main() 的 uMode=1 分支
 
 ![合并还原：六根枝拼回一条流水线，套回 main 的三模式外壳](images/11-reassemble.png)
 
+图 15：六根枝按数据流接回去，就是完整源码。
+
 到这一步，完整源码的逻辑已经拼回来了——知道每个函数在数据流里的位置，闭着眼能还原。
 
 ## 改一行验证
@@ -615,11 +645,15 @@ main() 的 uMode=1 分支
 
 ![验证一：C0 写成纯红，全屏变红](images/12-ablation-red.png)
 
+图 16：C0 写红，全屏红——印证 feedbackB 读的就是 C0。
+
 全屏变红。印证枝 6——`feedbackB` 读的就是 C0，C0 红了全屏红。
 
 **验证二：去掉 merge。** 把 `mergeUpper` 那一块删掉，重放：
 
 ![验证二：去掉 merge，全屏曝白](images/13-ablation-nomerge.png)
+
+图 17：去 merge，全屏曝白——印证 merge 是粗级辐照的搬运工。
 
 全屏曝白。印证枝 5——C0 自己的射线只有 0.0625 单位，够不到墙，全是 miss，写的是天空兜底；merge 正是把粗级真实辐照搬进 C0 的那一步。
 
@@ -634,6 +668,8 @@ main() 的 uMode=1 分支
 5. 理解对不对，改一行 shader 验证：C0 写红全屏红、去 merge 全屏曝白。
 
 ![能抄走的五句](images/14-takeaway.png)
+
+图 18：能抄走的五句。
 
 **结论**
 

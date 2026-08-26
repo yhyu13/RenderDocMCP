@@ -11,6 +11,7 @@ Reusable workflows for this repo live in `.kilo/skills/`:
 - `renderdoc-extension` — safely modify the RenderDoc Python 3.6 extension.
 - `renderdoc-debug` — living debug protocol (seed at `seed-protocol.json`).
 - `renderdoc-interactive-visualizer` — single-file interactive HTML visualization of an algorithm from a capture (real data + concept + pan/zoom).
+- `renderdoc-algorithm-article` — write a deep-dive article that reverse-engineers a GPU algorithm from a capture and teaches it (skeleton + evidence + figures).
 
 Use these skills for multi-step RenderDoc work; use direct tool calls only for one-off reads.
 
