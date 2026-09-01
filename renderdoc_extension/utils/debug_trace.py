@@ -46,6 +46,25 @@ def clamp_last_n(n):
     return n
 
 
+def collect_states(controller, debugger, limit):
+    """Walk ``ContinueDebug`` up to ``limit`` states. GPU-free duck-typed.
+
+    Shared by the capped summary queries and the full export walk so the
+    drain loop lives next to the other trace utilities (renderdoc-free), not
+    beside the ``import renderdoc`` in debug_service.py. The caller owns
+    FreeTrace; this only drains. Returns (states, truncated).
+    """
+    states = []
+    while len(states) < limit:
+        batch = controller.ContinueDebug(debugger)
+        if not batch:
+            break
+        states.extend(batch)
+    if len(states) > limit:
+        states = states[:limit]
+    return states, len(states) >= limit
+
+
 def _var_name(var):
     if var is None:
         return ""

@@ -12,6 +12,7 @@ from ..utils.debug_trace import (
     clamp_export_limit,
     clamp_last_n,
     clamp_max_steps,
+    collect_states,
     final_variables,
     write_trace_file,
 )
@@ -36,22 +37,6 @@ class DebugService:
         except Exception:
             return 0xFFFFFFFF
 
-    def _drain(self, controller, debugger, limit):
-        """Walk ``ContinueDebug`` up to ``limit`` states.
-
-        Shared by the capped summary queries and the full export walk so the
-        loop/FreeTrace semantics stay in one place. Returns (states, truncated).
-        """
-        states = []
-        while len(states) < limit:
-            batch = controller.ContinueDebug(debugger)
-            if not batch:
-                break
-            states.extend(batch)
-        if len(states) > limit:
-            states = states[:limit]
-        return states, len(states) >= limit
-
     def _run_trace(self, controller, trace, max_steps, last_n):
         """Capped walk -> summary (names-only states, no full values)."""
         if trace is None or getattr(trace, "debugger", None) is None:
@@ -62,7 +47,7 @@ class DebugService:
         max_steps = clamp_max_steps(max_steps)
         last_n = clamp_last_n(last_n)
         try:
-            states, _truncated = self._drain(controller, trace.debugger, max_steps)
+            states, _truncated = collect_states(controller, trace.debugger, max_steps)
             summary = cap_states(states, last_n)
             summary["available"] = True
             summary["max_steps"] = max_steps
@@ -88,7 +73,7 @@ class DebugService:
         truncated = False
         try:
             try:
-                states, truncated = self._drain(controller, trace.debugger, limit)
+                states, truncated = collect_states(controller, trace.debugger, limit)
             except Exception as e:
                 return {"error": "trace walk failed: %s" % str(e)}
             stage = ""

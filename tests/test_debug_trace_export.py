@@ -322,5 +322,49 @@ class TestHandlerDispatchVertexCompute(unittest.TestCase):
         self.assertIn("error", resp)
 
 
+class TestCollectStates(unittest.TestCase):
+    """The shared drain loop (moved GPU-free into debug_trace.py per critic B3)."""
+
+    def setUp(self):
+        self.tr = _load("rd_debug_trace_export", "renderdoc_extension/utils/debug_trace.py")
+
+    def _controller(self, batches):
+        class C:
+            def __init__(self, bs):
+                self._b = list(bs)
+
+            def ContinueDebug(self, debugger):
+                return self._b.pop(0) if self._b else []
+
+            def FreeTrace(self, trace):
+                pass
+
+        return C(batches)
+
+    def test_drains_to_natural_end(self):
+        c = self._controller([[_St(0, [])], [_St(1, [])], []])
+        states, truncated = self.tr.collect_states(c, object(), 10)
+        self.assertEqual(len(states), 2)
+        self.assertFalse(truncated)
+
+    def test_truncates_at_limit(self):
+        c = self._controller([[_St(0, []), _St(1, [])], [_St(2, [])]])
+        states, truncated = self.tr.collect_states(c, object(), 2)
+        self.assertEqual(len(states), 2)
+        self.assertTrue(truncated)
+
+    def test_empty_batch_before_limit_is_natural_end(self):
+        c = self._controller([[]])
+        states, truncated = self.tr.collect_states(c, object(), 5)
+        self.assertEqual(states, [])
+        self.assertFalse(truncated)
+
+    def test_limit_one_collects_single_state(self):
+        c = self._controller([[_St(0, [])], [_St(1, [])]])
+        states, truncated = self.tr.collect_states(c, object(), 1)
+        self.assertEqual(len(states), 1)
+        self.assertTrue(truncated)
+
+
 if __name__ == "__main__":
     unittest.main()
