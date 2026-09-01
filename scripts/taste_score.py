@@ -114,8 +114,29 @@ def _doc_shape(root, rel):
     return has_headers, round(density, 3), round(mean_len, 1)
 
 
-def _fig_count(root):
-    return len(list(root.glob("docs/*-zhihu/images/*.png")))
+def _fig_count_real(root):
+    """Count PNGs that are actually PNGs (magic bytes) and not 0-byte placeholders."""
+    n = 0
+    for p in root.glob("docs/*-zhihu/images/*.png"):
+        try:
+            if p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n" and p.stat().st_size > 500:
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
+def _bench_ok(root):
+    """A benchmark/measurement artifact exists AND carries a real number (not a stub)."""
+    for p in (list(root.glob("docs/*bench*")) + list(root.glob("docs/*perf*"))
+              + list(root.glob("scripts/*bench*"))):
+        try:
+            t = p.read_text(encoding="utf-8", errors="replace")
+            if re.search(r"\d", t):
+                return True
+        except Exception:
+            pass
+    return False
 
 
 # ----------------------------- git / suite ------------------------------
@@ -129,7 +150,13 @@ def _git(root, *args):
         return ""
 
 
+_SUITE_CACHE = {}
+
+
 def _suite(root):
+    key = str(root)
+    if key in _SUITE_CACHE:
+        return _SUITE_CACHE[key]
     try:
         r = subprocess.run(
             [sys.executable, "-m", "unittest", "discover", "-s", "tests"],
@@ -137,9 +164,11 @@ def _suite(root):
         )
         out = r.stdout + r.stderr  # unittest prints the summary to stderr
         m = re.search(r"Ran (\d+) tests", out)
-        return r.returncode == 0, (int(m.group(1)) if m else 0)
+        res = (r.returncode == 0, (int(m.group(1)) if m else 0))
     except Exception:
-        return False, 0
+        res = (False, 0)
+    _SUITE_CACHE[key] = res
+    return res
 
 
 def _gate(root):
@@ -183,9 +212,7 @@ DIMENSIONS = [
         ("no open live-GPU validation blocker",
          lambda r, m: _ngrep(r, "docs/ROADMAP-100-TASKS.md", r"T005|T083|live-GPU full-trace")),
         ("benchmark / measurement artifact exists",
-         lambda r, m: _glob_exists(r, "docs/*benchmark*")
-                       or _glob_exists(r, "scripts/*bench*")
-                       or _glob_exists(r, "docs/*-bench*")),
+         lambda r, m: _bench_ok(r)),
     ]),
     ("CAPABILITY PARITY", 0.22, [
         ("human 90% toolkit complete",
@@ -253,21 +280,21 @@ DIMENSIONS = [
                        and _grep(r, "renderdoc_extension/services/export_service.py", r"path")),
         ("responses bounded (limit/cap)",
          lambda r, m: _grep(r, m["server_file"], r"limit=|cap|max_entries")),
-        ("wheel ships mcp_server + rdc_harness",
-         lambda r, m: _grep(r, "pyproject.toml", r"mcp_server")
-                       and _grep(r, "pyproject.toml", r"rdc_harness")),
+        ("wheel ships mcp_server + rdc_harness + entry point",
+         lambda r, m: _grep(r, "pyproject.toml", r'mcp_server')
+                       and _grep(r, "pyproject.toml", r"rdc_harness")
+                       and _grep(r, "pyproject.toml", r"\[project\.scripts\]")
+                       and _grep(r, "pyproject.toml", r"renderdoc-mcp")),
         ("cache/perf design documented",
          lambda r, m: _glob_exists(r, "docs/openviking-cache-design.md")
                        or _grep(r, "README.md", r"RENDERDOC_MCP_CACHE|cache")),
-        ("quantified perf / benchmark documented",
-         lambda r, m: _glob_exists(r, "docs/*perf*")
-                       or _glob_exists(r, "docs/*bench*")),
     ]),
     ("VOICE & CONTENT", 0.10, [
         ("a real content pack exists",
-         lambda r, m: _glob_exists(r, "docs/*-zhihu/article.md") or _glob_exists(r, "docs/*-zhihu/*.html")),
-        ("figures are real (>=5 PNG)",
-         lambda r, m: _fig_count(r) >= 5),
+         lambda r, m: _glob_exists(r, "docs/*-zhihu/article.md")
+                       and len(_read_glob(r, "docs/*-zhihu/article.md")) > 500),
+        ("figures are real (>=5 nonzero PNG)",
+         lambda r, m: _fig_count_real(r) >= 5),
         ("inference marked, not asserted as fact",
          lambda r, m: _glob_exists(r, "docs/*-zhihu/article.md")
                        and len(_read_glob(r, "docs/*-zhihu/article.md")) > 800
