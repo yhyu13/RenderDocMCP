@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#f5f4f0;margin:0;padding:28px;color:#1c1c1c}
+h1{font-size:30px;margin:0 0 6px} .sub{color:#666;font-size:15px;margin-bottom:22px}
+.flow{display:flex;align-items:stretch}
+.node{flex:1;background:#fff;border:1px solid #ddd;border-radius:10px;padding:12px 14px}
+.node h3{margin:0 0 6px;font-size:14.5px}
+.node p{margin:0;font-size:12.5px;line-height:1.6;color:#444}
+.arrow{display:flex;align-items:center;padding:0 8px;font-size:22px;color:#999}
+.old{margin-top:16px;background:#fdeeee;border:1px solid #e4b5b5;border-radius:10px;padding:10px 16px;font-size:13.5px}
+.new{margin-top:10px;background:#eef5ee;border:1px solid #b5d4b5;border-radius:10px;padding:10px 16px;font-size:13.5px}
+code{font-family:Consolas,monospace;background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:12px}
+</style></head><body>
+<h1>树全貌：一条轨迹从 GPU 到文件</h1>
+<div class="sub">根是两个 API 调用；分岔点在"状态流"之后——旧路进 JSON，新路进文件</div>
+<div class="flow">
+  <div class="node"><h3>① 入口</h3><p><code>SetFrameEvent(184)</code> → <code>DebugPixel(320,240)</code> 建调试器</p></div>
+  <div class="arrow">→</div>
+  <div class="node"><h3>② 循环</h3><p><code>ContinueDebug</code> 反复调用，每批返回若干 <code>ShaderDebugState</code>（step / flags / changes），空批即终点</p></div>
+  <div class="arrow">→</div>
+  <div class="node"><h3>③ 状态流</h3><p>本文实跑共 <b>12 个状态</b>，内存里是完整对象：变量名 + before/after 值</p></div>
+</div>
+<div class="old"><b>旧路（capped）：</b>③ → 闸门三层 → 最后 8 状态的<b>名字</b>进 JSON → <code>FreeTrace</code>。中间步的值永久丢失。</div>
+<div class="new"><b>新路（debug_trace_export）：</b>③ → 循环走到自然结束 → 每状态全字段序列化 → <b>JSONL 13 行落盘</b> → 响应只回 path + total_steps → <code>FreeTrace</code>。</div>
+<div class="new" style="background:#fdf8ec;border-color:#d9c08a"><b>下一步（未做）：</b>同一条循环是三个入口共用的——<code>DebugVertex</code> / <code>DebugThread</code> 各加一层接线即可同款导出。</div>
+</body></html>

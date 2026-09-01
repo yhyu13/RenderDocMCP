@@ -52,6 +52,7 @@ class RequestHandler:
             "debug_pixel": self._handle_debug_pixel,
             "debug_vertex": self._handle_debug_vertex,
             "debug_thread": self._handle_debug_thread,
+            "debug_trace_export": self._handle_debug_trace_export,
             "list_resources": self._handle_list_resources,
             "get_resource": self._handle_get_resource,
             "replace_resource": self._handle_replace_resource,
@@ -462,6 +463,24 @@ class RequestHandler:
             int(params["thread_z"]),
             max_steps=params.get("max_steps", 64),
             last_n=params.get("last_n", 8),
+        )
+
+    def _handle_debug_trace_export(self, params):
+        event_id = params.get("event_id")
+        x = params.get("x")
+        y = params.get("y")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        if x is None or y is None:
+            raise ValueError("x and y are required")
+        return self.facade.debug_trace_export(
+            int(event_id),
+            int(x),
+            int(y),
+            sample=params.get("sample"),
+            primitive=params.get("primitive"),
+            path=params.get("path"),
+            max_steps=params.get("max_steps"),
         )
 
     def _handle_list_resources(self, params):

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#f5f4f0;margin:0;padding:28px;color:#1c1c1c}
+h1{font-size:30px;margin:0 0 18px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{background:#fff;border:1px solid #ddd;border-left:4px solid #1a6b3c;border-radius:8px;padding:12px 16px;font-size:14.5px;line-height:1.65}
+.card b{display:block;margin-bottom:2px}
+.card span{color:#777;font-size:13px}
+.wide{grid-column:1/3;border-left-color:#c8860d}
+</style></head><body>
+<h1>能抄走的六句</h1>
+<div class="grid">
+  <div class="card"><b>① 像素错了，先查 history，不开 shader 跟踪</b><span>历史给你"谁写的、谁失败的"名单，跟踪只调名单上该调的那个。</span></div>
+  <div class="card"><b>② 调最后一个 passing fragment</b><span>不是随便挑一个——被后来者盖掉的调试是白调。</span></div>
+  <div class="card"><b>③ capped 调试只给名字，丢值在打包层</b><span>RenderDoc 给得出全量；别把工具的省略当成引擎的极限。</span></div>
+  <div class="card"><b>④ 大轨迹永远走文件：路径过桥，字节不过桥</b><span>响应只回 path + 统计，agent 自己切片。1.5 万步塞上下文是炸弹。</span></div>
+  <div class="card"><b>⑤ 全轨迹是证据链</b><span>哪条指令、哪个变量、经几次搬运——capped 版答不了"从哪来的"。</span></div>
+  <div class="card"><b>⑥ 验证拿生产捕获，不拿玩具帧</b><span>12 步轨迹与像素历史逐位对上，才敢说"可用"。</span></div>
+  <div class="card wide"><b>主线一句话：把人类"这个像素为什么错"的调试循环整个搬给 agent，最后一步——完整轨迹——agent 比人拿得更全。</b><span>切割点在"状态流"与"响应"之间：文件接缝。</span></div>
+</div>
+</body></html>

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#f5f4f0;margin:0;padding:28px;color:#1c1c1c}
+h1{font-size:30px;margin:0 0 6px} .sub{color:#666;font-size:15px;margin-bottom:18px}
+.t{display:flex;flex-direction:column;gap:7px}
+.s{display:flex;align-items:center;gap:14px;background:#fff;border:1px solid #ddd;border-radius:8px;padding:9px 14px}
+.n{min-width:56px;font-family:Consolas,monospace;font-size:13px;color:#666}
+.vars{font-family:Consolas,monospace;font-size:13px;min-width:150px;color:#333}
+.d{font-size:13.5px;flex:1;line-height:1.55}
+.v{font-family:Consolas,monospace;font-size:12.5px;background:#f2efe6;border-radius:5px;padding:1px 7px;color:#555}
+.hot{border:2px solid #c8860d;background:#fff8e8}
+.hot .n::after{content:" ★";color:#c8860d}
+legend{font-size:13px;color:#888}
+.foot{margin-top:14px;font-size:13px;color:#888;line-height:1.6}
+code{font-family:Consolas,monospace;background:rgba(0,0,0,.06);border-radius:4px;padding:1px 5px;font-size:12px}
+</style></head><body>
+<h1>12 步全轨迹：颜色是哪条指令算出来的</h1>
+<div class="sub">数据来自 trace_e184_320_240.jsonl（13 行，每步带 16 宽 before/after 值）· ★ = 关键三步</div>
+<div class="t">
+  <div class="s"><div class="n">step 0</div><div class="vars">_35 _69</div><div class="d">寄存器初始化，GPU 哨兵值填充</div><div class="v">-1.07e8 ×16</div></div>
+  <div class="s"><div class="n">step 1</div><div class="vars">_57</div><div class="d">denormal 噪声（GL 调试器正常现象）</div><div class="v">4.2e-45</div></div>
+  <div class="s hot"><div class="n">step 2</div><div class="vars">_65</div><div class="d"><b>像素中心 UV</b> = (320.5/640, 240.5/480)</div><div class="v">[0.50078, 0.50104]</div></div>
+  <div class="s hot"><div class="n">step 3</div><div class="vars">_66</div><div class="d"><b>采 atlas 得 HDR 色</b>（G=1.016&gt;1，radiance）——与像素历史 shader_out 逐位相同</div><div class="v">[0.8694, 1.0165, 0.8117, 1.0]</div></div>
+  <div class="s"><div class="vars" style="min-width:60px"></div><div class="n">step 4</div><div class="vars">_57 _65 _35</div><div class="d">暂存清算，颜色进输出变量 _35</div><div class="v">_35 = 颜色</div></div>
+  <div class="s"><div class="n">step 5</div><div class="vars">_66 _73</div><div class="d">颜色接力进 _73，_66 清零</div><div class="v">_73 = 颜色</div></div>
+  <div class="s"><div class="n">step 6</div><div class="vars">_80</div><div class="d">常量向量装入</div><div class="v">[1,1,1,1]</div></div>
+  <div class="s"><div class="n">step 7</div><div class="vars">_81</div><div class="d">颜色再接力进 _81</div><div class="v">_81 = 颜色</div></div>
+  <div class="s"><div class="n">step 8</div><div class="vars">_73 _80 _87</div><div class="d">掩码准备：_87 = 1，_73/_80 清零</div><div class="v">_87 = [1,1,1,1]</div></div>
+  <div class="s hot"><div class="n">step 9</div><div class="vars">_88</div><div class="d"><b>颜色写入 _88</b>——像素最终颜色的直接来源</div><div class="v">_88 = 颜色</div></div>
+  <div class="s"><div class="n">step 10</div><div class="vars">_81 _87 _69</div><div class="d">收尾清算，颜色备份进 _69</div><div class="v">_69 = 颜色</div></div>
+  <div class="s"><div class="n">step 11</div><div class="vars">_88</div><div class="d">_88 清零，轨迹结束（next_instruction 113）</div><div class="v">_88 = 0</div></div>
+</div>
+<div class="foot">capped 版在这里只能看到每步的变量<b>名</b>；值全部来自导出文件。颜色 [0.8694, 1.0165, 0.8117, 1.0] 先后出现在 _66/_35/_73/_81/_88/_69 六个变量中（数值全程不变）——这就是"哪条指令算的、之后去了哪"的完整证据链。</div>
+</body></html>

@@ -31,6 +31,7 @@ DEBUG_METHODS = frozenset({
     "debug_pixel",
     "debug_vertex",
     "debug_thread",
+    "debug_trace_export",
     "replay_event",
     "replace_shader",
     "compile_shader",

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#f5f4f0;margin:0;padding:28px;color:#1c1c1c}
+h1{font-size:30px;margin:0 0 6px} .sub{color:#666;font-size:15px;margin-bottom:22px}
+.chain{display:flex;align-items:stretch;gap:0}
+.step{flex:1;background:#fff;border:1px solid #ddd;border-radius:10px;padding:16px 18px}
+.arrow{display:flex;align-items:center;padding:0 10px;font-size:26px;color:#999}
+.tool{font-family:Consolas,monospace;background:#eef3ee;border-radius:6px;padding:2px 8px;font-size:14px;color:#1a6b3c}
+.kv{margin-top:10px;font-size:14px;line-height:1.7}
+.big{font-size:16px;font-weight:bold;margin-top:8px}
+.val{font-family:Consolas,monospace;background:#fdf3e3;border-radius:5px;padding:1px 6px}
+.swatch{display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:-2px;border:1px solid #ccc}
+.foot{margin-top:18px;font-size:13px;color:#888}
+</style></head><body>
+<h1>三步锁定一个像素——人类杀手链的 agent 版</h1>
+<div class="sub">真捕获 new_rc_split_frame24.rdc（OpenGL，43.9 MB）· 像素 (320, 240) · 640×480 最终 RT</div>
+<div class="chain">
+  <div class="step"><span class="tool">pick_pixel(184, 320, 240)</span>
+    <div class="kv">先看这个像素<b>现在</b>是什么</div>
+    <div class="big"><span class="swatch" style="background:#baffa0"></span> <span class="val">[0.730, 1.000, 0.624, 1.0]</span></div>
+    <div class="kv">sRGB 终值，一眼确认"就是这个绿"</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step"><span class="tool">get_pixel_history(184, 320, 240)</span>
+    <div class="kv">谁写过它？谁测试失败过？</div>
+    <div class="big">2 个 fragment，全部 depth-pass</div>
+    <div class="kv">最后写入者：<b>event 184</b><br>shader_out = <span class="val">[0.869, 1.016, 0.812, 1.0]</span><br>（G 通道 1.016 &gt; 1，HDR radiance）</div>
+  </div>
+  <div class="arrow">→</div>
+  <div class="step"><span class="tool">debug_pixel(184, 320, 240)</span>
+    <div class="kv">只调<b>最后一个 passing</b> 的 fragment</div>
+    <div class="big">进入 12 步轨迹</div>
+    <div class="kv">人类纪律：不是随便挑一个 fragment，是挑活到最后那个</div>
+  </div>
+</div>
+<div class="foot">三个入口都有真机返回值；本文全部数字来自这次会话的实跑。</div>
+</body></html>

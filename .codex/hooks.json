@@ -1,0 +1,102 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\session-start.js\"",
+            "timeout": 5,
+            "statusMessage": "OpenWolf session bootstrap"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\pre-read.js\"",
+            "timeout": 5,
+            "statusMessage": "OpenWolf read precheck"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\pre-write.js\"",
+            "timeout": 5,
+            "statusMessage": "OpenWolf write precheck"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\post-read.js\"",
+            "timeout": 5,
+            "statusMessage": "OpenWolf read tracking"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\post-write.js\"",
+            "timeout": 10,
+            "statusMessage": "OpenWolf anatomy update"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|execute|Run|tool",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\post-test.js\"",
+            "timeout": 10,
+            "statusMessage": "OpenWolf test outcome tracking"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\precompact.js\"",
+            "timeout": 5,
+            "statusMessage": "OpenWolf compaction snapshot"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"D:\\GitRepo-AI\\renderdoc\\RenderDocMCP\\.wolf\\hooks\\stop.js\"",
+            "timeout": 10,
+            "statusMessage": "OpenWolf session wrap-up"
+          }
+        ]
+      }
+    ]
+  }
+}

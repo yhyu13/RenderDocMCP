@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#f5f4f0;margin:0;padding:28px;color:#1c1c1c}
+h1{font-size:30px;margin:0 0 6px} .sub{color:#666;font-size:15px;margin-bottom:22px}
+.layers{display:flex;flex-direction:column;gap:12px}
+.layer{background:#fff;border:1px solid #ddd;border-radius:10px;padding:14px 18px;display:flex;align-items:center;gap:18px}
+.n{min-width:120px;font-weight:bold;font-size:15px}
+.d{flex:1;font-size:14px;line-height:1.7}
+code{font-family:Consolas,monospace;background:rgba(0,0,0,.06);border-radius:4px;padding:1px 6px;font-size:12.5px}
+.hurt{color:#a03030;font-weight:bold}
+.case{margin-top:16px;background:#eef5ee;border:1px solid #b5d4b5;border-radius:10px;padding:12px 18px;font-size:14px;line-height:1.7}
+.red{color:#c02020;font-weight:bold}
+</style></head><body>
+<h1>capped 版丢掉了什么：三层截断</h1>
+<div class="sub">debug_pixel 的返回经过三道闸门——每道都在扩展侧打包层，不在 RenderDoc</div>
+<div class="layers">
+  <div class="layer"><div class="n">闸门 1 · 步数</div><div class="d">默认走 <code>64</code> 步，硬顶 <code>256</code>。真实 PS 轨迹量级 <b>1 万–1.5 万步</b>，走不到头。</div></div>
+  <div class="layer"><div class="n">闸门 2 · 状态数</div><div class="d">走到的状态里只返回<b>最后 8 个</b>（硬顶 32），前面的全扔。</div></div>
+  <div class="layer"><div class="n">闸门 3 · 值</div><div class="d">留下的状态只有变量<b>名</b>；数值只在终点捞最多 24 个。中途谁变成什么，<span class="hurt">全部丢失</span>。</div></div>
+</div>
+<div class="case"><b>本文真例（12 步小 shader）：</b>capped 返回 12 步里的最后 8 步、<b>0 个变量值</b>；<code>count:12, returned:8</code>。轨迹越小，闸门 1、2 越无害——<span class="red">闸门 3 才是永远在流血的口子</span>。</div>
+<div class="case" style="background:#fdeeee;border-color:#e4b5b5"><span class="red">不是 RenderDoc 不给</span>——扩展侧本来就拿到了完整状态流，是打包成 JSON 时把值扔了。</div>
+</body></html>

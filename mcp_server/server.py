@@ -755,6 +755,38 @@ def debug_thread(
 
 
 @mcp.tool
+def debug_trace_export(
+    event_id: int,
+    x: int,
+    y: int,
+    sample: int | None = None,
+    primitive: int | None = None,
+    path: str | None = None,
+    max_steps: int | None = None,
+) -> dict:
+    """Dump the FULL pixel-debug trajectory to a JSONL file; return path + stats.
+
+    Unlike debug_pixel (capped summary: 256 steps, last 32 states, names only),
+    this walks every ContinueDebug state to the natural end and writes each
+    step with changed-variable before/after values to `path` (default under
+    %TEMP%/renderdoc_mcp/exports/). The response never carries the states:
+    slice the file with Read offset/limit or grep. Real PS traces run 10k-15k
+    steps. Shader debugging is D3D11/D3D12/Vulkan only; GL captures usually
+    lack debug info. 120s timeout tier.
+    """
+    params: dict[str, object] = {"event_id": event_id, "x": x, "y": y}
+    if sample is not None:
+        params["sample"] = sample
+    if primitive is not None:
+        params["primitive"] = primitive
+    if path is not None:
+        params["path"] = path
+    if max_steps is not None:
+        params["max_steps"] = max_steps
+    return bridge.call("debug_trace_export", params)
+
+
+@mcp.tool
 def list_resources(
     resource_type: str | None = None,
     name: str | None = None,

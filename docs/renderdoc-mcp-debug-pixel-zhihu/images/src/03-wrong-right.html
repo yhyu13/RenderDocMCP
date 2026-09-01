@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><style>
+body{font-family:"Microsoft YaHei",sans-serif;background:#f5f4f0;margin:0;padding:28px;color:#1c1c1c}
+h1{font-size:30px;margin:0 0 6px} .sub{color:#666;font-size:15px;margin-bottom:22px}
+.wrap{display:flex;gap:20px}
+.col{flex:1;border-radius:10px;padding:18px 20px}
+.wrong{background:#fdeeee;border:1px solid #e4b5b5}
+.right{background:#eef5ee;border:1px solid #b5d4b5}
+.tag{font-size:15px;font-weight:bold;margin-bottom:10px}
+.wrong .tag{color:#a03030}.right .tag{color:#1a6b3c}
+.line{font-size:14.5px;line-height:1.75}
+code{font-family:Consolas,monospace;background:rgba(0,0,0,.06);border-radius:4px;padding:1px 6px;font-size:13px}
+.red{color:#c02020;font-weight:bold}
+.foot{margin-top:18px;font-size:13px;color:#888}
+</style></head><body>
+<h1>全轨迹怎么给：不是塞进上下文，是写进文件</h1>
+<div class="sub">真实 PS 轨迹量级 1 万–1.5 万步（参考：人类 GUI 每次开的就是这条完整轨迹）</div>
+<div class="wrap">
+  <div class="col wrong">
+    <div class="tag">✗ 错路：把硬上限拉高</div>
+    <div class="line"><code>max_steps</code> 256→∞，<code>last_n</code> 32→∞，全量塞进 JSON 响应。</div>
+    <div class="line" style="margin-top:10px"><span class="red">1.5 万步 × 每步变量 = token 炸弹</span>，读的人根本扫不完；仓库自己的铁律也写着"never the full ISA dump"。</div>
+    <div class="line" style="margin-top:10px;color:#8a5555">丢了三层 → 想用"不丢"来解决 → 丢给了读者。</div>
+  </div>
+  <div class="col right">
+    <div class="tag">✓ 正路：debug_trace_export</div>
+    <div class="line"><code>ContinueDebug</code> 循环走到<b>自然结束</b>，每步全字段（含 before/after 值）写 JSONL 文件。</div>
+    <div class="line" style="margin-top:10px">响应只回 <code>{path, total_steps, truncated}</code>——与 export_buffer / export_texture 同一个模式：<b>路径过桥，字节不过桥</b>。</div>
+    <div class="line" style="margin-top:10px">agent 之后用 Read 的 offset/limit 或 grep 任意切片，一步不少，上下文不炸。</div>
+  </div>
+</div>
+<div class="foot">真机实测：12 步轨迹 → trace_e184_320_240.jsonl，13 行，每步带 16 宽 before/after 值。</div>
+</body></html>

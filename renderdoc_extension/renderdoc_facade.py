@@ -242,6 +242,9 @@ class RenderDocFacade:
             event_id, group_x, group_y, group_z, thread_x, thread_y, thread_z, max_steps, last_n
         )
 
+    def debug_trace_export(self, event_id, x, y, sample=None, primitive=None, path=None, max_steps=None):
+        return self._debug.debug_trace_export(event_id, x, y, sample, primitive, path, max_steps)
+
     def list_resources(self, resource_type=None, name=None, limit=200):
         return self._resource.list_resources(resource_type, name, limit)
 

@@ -51,3 +51,11 @@ Packaging is uv-managed (`uv.lock`, `[tool.uv] package = true`); console script 
 
 - `README.md` (Chinese) is the authoritative, up-to-date doc — it covers `rdc_harness`, the shader edit/replay tools, and the L1/L2 verification design.
 - `CLAUDE.md` (Japanese) is an older mirror that predates `rdc_harness`; treat it as stale and prefer the README when they disagree. `JOURNEY.md` is a dev log, not a spec.
+
+<!-- openwolf:begin -->
+# OpenWolf
+
+@.wolf/OPENWOLF.md
+
+This project uses OpenWolf for context management. Read and follow .wolf/OPENWOLF.md every session. Check .wolf/cerebrum.md before generating code. Check .wolf/anatomy.md before reading files.
+<!-- openwolf:end -->

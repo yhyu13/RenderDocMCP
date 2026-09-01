@@ -100,6 +100,7 @@ RenderDocMCP/
 | `debug_pixel` | 像素着色器步进（默认 64 步 / 最后 8 态，硬顶 256；bridge 超时 120s） |
 | `debug_vertex` | 顶点着色器步进 |
 | `debug_thread` | Compute 单线程步进 |
+| `debug_trace_export` | **全轨迹导出**：走完整个 `ContinueDebug` 循环，逐步（含变量 before/after 值）写 JSONL 文件，只回路径+统计（默认 `%TEMP%/renderdoc_mcp/exports/trace_e*.jsonl`）；用 Read/grep 切片，勿整读。真实 PS 轨迹 1 万–1.5 万步；120s 超时档；缓存 bypass |
 
 ### 资源目录 + 通用替换（Phase 3）
 

@@ -185,3 +185,54 @@ Product loop, ResourceId lookup, GetCaptureFile/ReplayManager, and encoding name
 |---|---|
 | Use `~\.kilo\skills\tech-design-to-zhihu\` to update the Zhihu article, and push. | Two paste packs (知乎 CLI 只能读本人创作，不能发文)。缓存文迁回 OpenViking：`D:\GitRepo-AI\OpenViking\openviking-cache-design-zhihu\`。本仓库只留 `docs/renderdoc-mcp-zhihu/`（产品是像素变了，不是五十个工具）。 |
 | Finish remaining live-unproven tools + rewrite Zhihu pack. | Live `frame480` still loaded. Gap script: `find_draws_by_resource(::56)` → Pixel SRV slot 0 (no Hull false-positive); `get_resource_usage` → `PS_Resource` event 550; `get_shader_info` CBs ok; thumbnail + `export_render_target` 1280×720; `export_buffer(::125)` 48 B; `set_event`; `compile_custom_shader` GLSL 330+binding → `…315`; `restore_all_replacements` empty. `get_section("notes")` missed exact name (`renderdoc/ui/notes` works); suffix/type fallback added. Zhihu pack rewritten to skill shape: TL;DR, 错路/脉络/树, 8 PNGs, 收获和结论, PS/PPS/PPPS. 157 tests. |
+
+---
+
+## Competitive research: human expert vs MCP gap (2026-08-29)
+
+> Deliverable: `docs/renderdoc-mcp-competitive-research.md`. Two questions: (1) what can a human expert do to an .rdc that the MCP cannot; (2) can we do single pixel debug and dump the full trajectory.
+
+| Me | You |
+|---|---|
+| 竞品研究：盘点 55 个 `@mcp.tool`（server.py）对照 human-experience spec，判定"单像素调试能不能做、全轨迹能不能 dump"。 | 90% 循环已全覆盖。真实硬缺口 8 项（排序）：shader 调试只回摘要、GUI overlay、mesh 全量、API Inspector、实时触发捕获、Statistics 聚合、A/B diff、断点交互。结构性缺口 1 个：内嵌 Python 控制台 = 任意脚本，封闭工具面补不齐。 |
+| 追问：全轨迹到底卡在哪一层？ | 证据钉死在扩展侧三层截断：`HARD_MAX_STEPS=256`、`HARD_LAST_N=32`、`summarize_state` 只留变量名丢值（debug_trace.py:6-9,56-70,123-144）+ 无条件 `FreeTrace`（debug_service.py:51-55）。RenderDoc 本身给得出 10k–15k 步全轨迹，是打包时扔的。 |
+| 方案收敛 | 拒绝提上限回 JSON（token 炸弹，违反 debug_trace.py:3 与 human-experience.md:237 铁律）。推荐方案 C：新工具 `debug_trace_export` 走完整 ContinueDebug 循环、全量写文件（JSONL）、只回 path+统计——与 export_buffer/export_texture 同模式；agent 用 Read 切片。落地骨架 6 条已写进文档，含 120s 长超时与 NaN 清洗注意项。 |
+
+---
+
+## debug_trace_export: full trajectory to file (2026-08-29, go on plan C)
+
+> Decision: competitive research round approved plan C. New tool walks the FULL ContinueDebug loop, serializes every state with before/after values to a JSONL file, returns only path + stats. Same pattern as export_buffer/export_texture (path, never bytes).
+
+| Me | You |
+|---|---|
+| update journey and go. | TDD: GPU-free red test for full-state serialization + file write + NaN cleaning first, then extension-side walk-to-file (Python 3.6 stdlib only), facade/request_handler wiring, MCP tool with cache bypass, README row. Real-GPU full-trace validation stays open. |
+
+### Result (closed 2026-08-29, live-GPU validation still open)
+
+TDD red (10 failing) → green. utils/debug_trace.py gained clamp_export_limit (hard ceiling 1M, rejects <=0), serialize_state_full, write_trace_file (JSONL: header line + one state per line, NaN/Inf -> string markers), nomalies_for (cap_states refactored onto it, behavior-identical, old tests pin it). debug_service.debug_trace_export walks to natural end (or cap), writes file, returns path+stats only, FreeTrace in finally, catch-all around the walk. Wired facade → request_handler → bridge DEBUG_METHODS (120s) → @mcp.tool debug_trace_export (server.py). Not in CACHEABLE_READ_ONLY → bypasses by design. README row + research doc status added. Critic subagent: BLOCKING=0, 3 MINORs fixed in-round (hard ceiling, max_steps<=0 ValueError, walk catch-all). 170/170 tests (py -3.13); all changed files py_compile OK.
+
+Scope cut: pixel entry only — VS/compute export not built (not requested; shared walk helper makes it +1 wiring each if needed). Open: real-GPU full-trace run on a D3D capture with debug info; NaN-in-response inal_variables nit is pre-existing parity with debug_pixel, left as-is. Reminder: rom ..utils import Parsers in debug_service.py is pre-existing dead import — flagged, not removed.
+
+### Real-rdc validation (2026-08-29, production capture)
+
+Capture: phase12_d/new_rc_split_frame24.rdc (OpenGL, 43.9 MB, the production New RC baseline from the 竞品研究 txt). Flow: reinstalled extension (new debug_trace_export) → restarted qrenderdoc on the split capture → draws shifted to events 184/186, PS ResourceId::48, RT ::229 640x480. Pixel history at (320,240): 2 passing fragments, last writer event 184 shader_out [0.8694461584091187, 1.0164883136749268, 0.8117004036903381, 1.0] — bit-identical to phase12_b's event 166, matching the G9 bit-identical claim. Capped debug_pixel: 12 total steps, names only. Raw file-IPC debug_trace_export (Kilo-side MCP server process still old, so the request went straight to request.json/response.json): {available:true, total_steps:12, truncated:false} → 	race_e184_320_240.jsonl 13 lines (header + 12 states), every change carries full 16-wide before/after VALUES. Cross-checks: step sequence of changed names matches capped output exactly; step 3 _66 after == pixel-history shader_out bitwise; step 2 _65 == pixel-center UV (320.5/640, 240.5/480). First real full-trajectory dump: the agent can now answer WHICH instruction produced the color — impossible from capped tools.
+
+Observations (non-blocking): (a) inal_variables is [] on this GL backend because change fter.name is empty and names live on efore — summarize_state/serialize_state_full have the _var_name(after) or _var_name(before) fallback, inal_variables does not; same empty on pre-existing debug_pixel, left as-is. (b) step values include GPU uninitialized sentinels (-107374176.0) and a denormal (4.2e-45) — normal GL debugger noise. (c) Kilo-side MCP server must be restarted once for debug_trace_export to appear as a tool; extension side is already installed. Helper kept at %TEMP%/kilo/raw_ipc_call.py (mirrors bridge/client.py protocol).
+
+---
+
+## Zhihu pack: debug pixel + full trajectory (2026-08-29)
+
+> Deliverable: docs/renderdoc-mcp-debug-pixel-zhihu/ (article.md + 9 PNGs + PUBLISH.md). Skill: tech-design-to-zhihu. Main line: the human single-pixel debug chain ported to the agent, with the agent taking the last step (full trajectory) further than the GUI.
+
+| Me | You |
+|---|---|
+| 能生成 debug pixel 文档吗，需要图。 | 3 张实拍直接从在线捕获导出（final-frame 640x480、C0 atlas 1024x512；atlas-c5 备用未引用已删）；5 张真数据/示意 PNG 用 HTML+Playwright 渲染（杀手链/错路/脉络/三层截断/树全貌/12 步轨迹/收获总图），file:// 被拦就用 py http.server 8777 绕。HTML 源留在 images/src/ 可再生成。 |
+| 双向回读抓到什么 | Pass 1 保真修 3 处：'9 个 GPU 动作'与帧统计不符（补 clear/present）；颜色搬运链含推断（_66→_35 无直接 before/after 证据），改为纯事实'先后出现在六个变量中'；'辐照 atlas'降为'级联 atlas（C0 级）'。Pass 2：禁用词/mermaid/绝对路径扫描 CLEAN；'不是X而是Y'正文 2 处（≤3）；红字图 2 张（03/05，04 改中性色重截）。 |
+
+### Pack facts (all traceable to this session)
+
+- 43.9 MB OpenGL capture, 2 draws (events 184/186) + 7 dispatches, PS ResourceId::48, RT ::229 640x480 R8G8B8A8_SRGB.
+- Pixel (320,240): 2 passing fragments, last writer event 184, shader_out [0.8694, 1.0165, 0.8117, 1.0] (G>1 HDR) -> sRGB 0.730.
+- trace_e184_320_240.jsonl: 13 lines, 12 states, 16-wide before/after values; step2 _65 = pixel-center UV; color appears in _66/_35/_73/_81/_88/_69 unchanged.
