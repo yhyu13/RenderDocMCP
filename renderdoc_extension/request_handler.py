@@ -53,6 +53,8 @@ class RequestHandler:
             "debug_vertex": self._handle_debug_vertex,
             "debug_thread": self._handle_debug_thread,
             "debug_trace_export": self._handle_debug_trace_export,
+            "debug_trace_export_vertex": self._handle_debug_trace_export_vertex,
+            "debug_trace_export_compute": self._handle_debug_trace_export_compute,
             "list_resources": self._handle_list_resources,
             "get_resource": self._handle_get_resource,
             "replace_resource": self._handle_replace_resource,
@@ -479,6 +481,43 @@ class RequestHandler:
             int(y),
             sample=params.get("sample"),
             primitive=params.get("primitive"),
+            path=params.get("path"),
+            max_steps=params.get("max_steps"),
+        )
+
+    def _handle_debug_trace_export_vertex(self, params):
+        event_id = params.get("event_id")
+        vertex_id = params.get("vertex_id")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        if vertex_id is None:
+            raise ValueError("vertex_id is required")
+        return self.facade.debug_trace_export_vertex(
+            int(event_id),
+            int(vertex_id),
+            instance=params.get("instance", 0),
+            index=params.get("index"),
+            view=params.get("view", 0),
+            path=params.get("path"),
+            max_steps=params.get("max_steps"),
+        )
+
+    def _handle_debug_trace_export_compute(self, params):
+        event_id = params.get("event_id")
+        required = ("group_x", "group_y", "group_z", "thread_x", "thread_y", "thread_z")
+        if event_id is None:
+            raise ValueError("event_id is required")
+        for key in required:
+            if params.get(key) is None:
+                raise ValueError("%s is required" % key)
+        return self.facade.debug_trace_export_compute(
+            int(event_id),
+            int(params["group_x"]),
+            int(params["group_y"]),
+            int(params["group_z"]),
+            int(params["thread_x"]),
+            int(params["thread_y"]),
+            int(params["thread_z"]),
             path=params.get("path"),
             max_steps=params.get("max_steps"),
         )

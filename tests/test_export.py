@@ -84,5 +84,51 @@ class TestBackendCompileFlags(unittest.TestCase):
         self.assertEqual(compile[1]["compile_flags"], "debug")
 
 
+class TestExportContractNoBytes(unittest.TestCase):
+    """The export contract: responses carry string paths / hashes / counts, never raw bytes.
+
+    The harness writes image/buffer bytes to disk; the JSON contract must only
+    ever carry a path or metadata, so an agent never loads a multi-MB blob into
+    context. This pins that contract on the GPU-free export surface.
+    """
+
+    def _assert_no_raw_bytes(self, d):
+        for v in d.values():
+            self.assertNotIsInstance(v, (bytes, bytearray), "export response embeds raw bytes")
+            if isinstance(v, dict):
+                self._assert_no_raw_bytes(v)
+
+    def test_shader_patch_paths_are_strings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = write_shader_patch(
+                original="float4 main(){return 0;}\n",
+                final="float4 main(){return 1;}\n",
+                dest_dir=tmp,
+                stem="fix",
+            )
+            self.assertIsInstance(out["hlsl_path"], str)
+            self.assertIsInstance(out["patch_path"], str)
+            self.assertIsInstance(out["patch"], str)
+            self.assertTrue(out["changed"])
+            self._assert_no_raw_bytes(out)
+
+    def test_golden_meta_is_metadata_not_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = write_golden(tmp, "rt0", b"\xff" * 4, event_id=3)
+            self.assertIsInstance(meta["path"], str)
+            self.assertIsInstance(meta["meta_path"], str)
+            self.assertIsInstance(meta["sha256"], str)
+            self.assertEqual(meta["bytes"], 4)
+            self._assert_no_raw_bytes(meta)
+
+    def test_artifacts_report_contract(self):
+        result = {"status": "ok", "source": "fixed\n", "history": []}
+        rep = build_fix_report(result=result, original_hlsl="orig\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            out = artifacts_from_fix_report(rep, "orig\n", tmp, stem="o")
+            self.assertIsInstance(out["hlsl_path"], str)
+            self._assert_no_raw_bytes(out)
+
+
 if __name__ == "__main__":
     unittest.main()

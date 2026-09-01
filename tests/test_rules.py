@@ -8,6 +8,12 @@ from rdc_harness import (
     detect_red_flags,
     run_deterministic,
 )
+from rdc_harness.rules import (
+    check_binding_completeness,
+    check_min_lod,
+    rule_bandwidth,
+    rule_setpass_rt,
+)
 
 
 def healthy_frame():
@@ -162,6 +168,41 @@ class TestDegradedInputs(unittest.TestCase):
         report = run_deterministic(healthy_frame(), passes=passes)
         rules = {c.rule: c.status for c in report.checks}
         self.assertEqual(rules.get("min_lod"), CheckStatus.PASS)
+
+
+class TestMissingDataNoFalsePass(unittest.TestCase):
+    """Pin the guards: absent/incomplete data must SKIP/None, never false-PASS."""
+
+    def test_bandwidth_no_data_returns_none(self):
+        self.assertIsNone(rule_bandwidth(Thresholds(), {}))
+
+    def test_bandwidth_no_pct_no_status_returns_none(self):
+        frame = {"memory_bandwidth": {"l2_throughput_pct": None}}
+        self.assertIsNone(rule_bandwidth(Thresholds(), frame))
+
+    def test_setpass_no_api_stats_returns_empty(self):
+        self.assertEqual(rule_setpass_rt(Thresholds(), {}), [])
+
+    def test_setpass_api_stats_no_fields_returns_empty(self):
+        self.assertEqual(rule_setpass_rt(Thresholds(), {"api_stats": {}}), [])
+
+    def test_min_lod_no_samplers_returns_none(self):
+        self.assertIsNone(check_min_lod({}))
+
+    def test_min_lod_samplers_no_signal_returns_none(self):
+        # Sampler present but neither min_lod nor mip_levels -> not verifiable.
+        self.assertIsNone(check_min_lod({"samplers": [{"slot": 0}]}))
+
+    def test_binding_no_shaders_returns_none(self):
+        self.assertIsNone(check_binding_completeness({}))
+
+    def test_binding_empty_resources_fails(self):
+        res = check_binding_completeness({"shaders": {"ps": {"resources": []}}})
+        self.assertEqual(res.status, CheckStatus.FAIL)
+
+    def test_binding_bound_resources_pass(self):
+        res = check_binding_completeness({"shaders": {"ps": {"resources": [{"id": 1}]}}})
+        self.assertEqual(res.status, CheckStatus.PASS)
 
 
 if __name__ == "__main__":

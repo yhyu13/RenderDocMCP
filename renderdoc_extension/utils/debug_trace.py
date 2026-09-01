@@ -97,7 +97,10 @@ def final_variables(st, limit=24):
     seen = set()
     for ch in list(getattr(st, "changes", None) or []):
         after = getattr(ch, "after", None)
-        name = _var_name(after)
+        # Match serialize_state_full / summarize_state: some backends (e.g. GL)
+        # leave the *after* var name empty; fall back to the *before* variant so
+        # the name survives. Without this, final_variables comes back [] on GL.
+        name = _var_name(after) or _var_name(getattr(ch, "before", None))
         if not name or name in seen:
             continue
         seen.add(name)

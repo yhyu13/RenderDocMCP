@@ -245,6 +245,14 @@ class RenderDocFacade:
     def debug_trace_export(self, event_id, x, y, sample=None, primitive=None, path=None, max_steps=None):
         return self._debug.debug_trace_export(event_id, x, y, sample, primitive, path, max_steps)
 
+    def debug_trace_export_vertex(self, event_id, vertex_id, instance=0, index=None, view=0, path=None, max_steps=None):
+        return self._debug.debug_trace_export_vertex(event_id, vertex_id, instance, index, view, path, max_steps)
+
+    def debug_trace_export_compute(self, event_id, group_x, group_y, group_z, thread_x, thread_y, thread_z, path=None, max_steps=None):
+        return self._debug.debug_trace_export_compute(
+            event_id, group_x, group_y, group_z, thread_x, thread_y, thread_z, path, max_steps
+        )
+
     def list_resources(self, resource_type=None, name=None, limit=200):
         return self._resource.list_resources(resource_type, name, limit)
 

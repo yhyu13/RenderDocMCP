@@ -787,6 +787,68 @@ def debug_trace_export(
 
 
 @mcp.tool
+def debug_trace_export_vertex(
+    event_id: int,
+    vertex_id: int,
+    instance: int = 0,
+    index: int | None = None,
+    view: int = 0,
+    path: str | None = None,
+    max_steps: int | None = None,
+) -> dict:
+    """Dump the FULL vertex-shader (VS) debug trajectory to a JSONL file; return path + stats.
+
+    Same contract as debug_trace_export (pixel): walks every ContinueDebug state,
+    writes before/after values per step to `path`, returns only path + stats.
+    Shader debugging is D3D11/D3D12/Vulkan only; GL captures usually lack debug
+    info. 120s timeout tier.
+    """
+    params: dict[str, object] = {"event_id": event_id, "vertex_id": vertex_id, "instance": instance}
+    if index is not None:
+        params["index"] = index
+    if view is not None:
+        params["view"] = view
+    if path is not None:
+        params["path"] = path
+    if max_steps is not None:
+        params["max_steps"] = max_steps
+    return bridge.call("debug_trace_export_vertex", params)
+
+
+@mcp.tool
+def debug_trace_export_compute(
+    event_id: int,
+    group_x: int,
+    group_y: int,
+    group_z: int,
+    thread_x: int,
+    thread_y: int,
+    thread_z: int,
+    path: str | None = None,
+    max_steps: int | None = None,
+) -> dict:
+    """Dump the FULL compute (single thread) debug trajectory to a JSONL file; return path + stats.
+
+    Same contract as debug_trace_export (pixel). Shader debugging is D3D11/D3D12/
+    Vulkan only; GL captures usually lack debug info. 120s timeout tier.
+    """
+    params: dict[str, object] = {
+        "event_id": event_id,
+        "group_x": group_x,
+        "group_y": group_y,
+        "group_z": group_z,
+        "thread_x": thread_x,
+        "thread_y": thread_y,
+        "thread_z": thread_z,
+    }
+    if path is not None:
+        params["path"] = path
+    if max_steps is not None:
+        params["max_steps"] = max_steps
+    return bridge.call("debug_trace_export_compute", params)
+
+
+@mcp.tool
 def list_resources(
     resource_type: str | None = None,
     name: str | None = None,

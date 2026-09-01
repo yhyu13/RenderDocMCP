@@ -348,7 +348,9 @@ def check_validation_messages(
 
 
 def check_binding_completeness(pipeline: Mapping[str, Any]) -> Optional[CheckResult]:
-    """Resource binding completeness (doc3 §3.1): bound shader must have its inputs bound."""
+    """Binding completeness (doc3 §3.1): a shader stage flagged as having an
+    empty `resources` list is incomplete. (The check inspects each stage's
+    `resources` list — empty means no bound inputs for that stage.)"""
     shaders = _get(pipeline, "shaders")
     if not isinstance(shaders, Mapping) or not shaders:
         return None

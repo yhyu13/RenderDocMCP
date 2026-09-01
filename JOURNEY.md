@@ -236,3 +236,28 @@ Observations (non-blocking): (a) inal_variables is [] on this GL backend becaus
 - 43.9 MB OpenGL capture, 2 draws (events 184/186) + 7 dispatches, PS ResourceId::48, RT ::229 640x480 R8G8B8A8_SRGB.
 - Pixel (320,240): 2 passing fragments, last writer event 184, shader_out [0.8694, 1.0165, 0.8117, 1.0] (G>1 HDR) -> sRGB 0.730.
 - trace_e184_320_240.jsonl: 13 lines, 12 states, 16-wide before/after values; step2 _65 = pixel-center UV; color appears in _66/_35/_73/_81/_88/_69 unchanged.
+
+---
+
+## P0 round: debug_trace_export full parity + verification-engine hardening (2026-09-01)
+
+> Software-dev-loop, "review P0 + exec P0 only, no questions." Deliverables: 100-task roadmap (`docs/ROADMAP-100-TASKS.md`) + P0 executed GPU-free, test-backed, committed locally (no push).
+
+| Me | You |
+|---|---|
+| "investigate both repos → brainstorm 100 tasks P0-P2 → dump to doc → review P0 → exec P0 only, until done" | Read both repos end-to-end (JOURNEYs, README, AGENTS, competitive-research, source). Baseline 170/170 (`py -3.13`). Wrote `docs/ROADMAP-100-TASKS.md`: persisted goal + 100 tasks T001-T100 (P0/P1/P2) + P0 plan + acceptance bars. Ran one fresh-context plan critic (confirmed key facts; plan verified). |
+| — | Key ground-truth fix: the `debug_trace_export` **pixel** work was **already committed** (`aba6f86`, yhxd123) — my initial `git status` was stale; working tree source was clean. So "commit the dangling pixel work" was a NO-OP, not a task. |
+| — | Exec P0 (GPU-free, red-green): `debug_trace_export` gained `_vertex` + `_compute` full-trajectory entries via a shared `_drain`/`_export_trace` walk (was pixel-only; competitive-research plan C was pixel-bound). Wired bridge → facade → handler → server (3 `@mcp.tool` total now 57). `final_variables` name fallback (GL `after.name` empty) + test; removed dead `from ..utils import Parsers`; `check_binding_completeness` docstring aligned; pinned `rule_setpass_rt`/`rule_bandwidth`/`check_min_lod` missing-data guards; export byte-vs-path contract test; new `scripts/test_all.py` (py_compile + Python-3.6 boundary gate + full suite) + `scripts/six_gate.py` + `tests/test_six_gate.py`. |
+| — | Verified no-ops (not re-churned): `score_from_report` 1.0 sentinel already tested; `resolve_export_path` dir creation already at caller layer; `.gitignore` already ignores pyc/__pycache__; human-experience byte-identical across repos. |
+| — | Test count **170 → 194**, all green; `scripts/test_all.py` gate green. **Blocked:** `AGENTS.md` (protected agent-instruction file) — the `test_all` command line landed on disk but the `debug_trace_export` architecture bullet was consent-gated (timed out) and left uncommitted for review. Local commit created; **no push**. |
+
+### Deliverables
+- `docs/ROADMAP-100-TASKS.md` (100 tasks + P0 plan + P0 status).
+- `renderdoc_extension/services/debug_service.py` — `_drain`/`_export_trace` shared walk + `debug_trace_export_vertex`/`_compute`.
+- `mcp_server/{bridge/client.py,server.py}`, `renderdoc_facade.py`, `request_handler.py` — 2 new tools wired, 120s tier.
+- `renderdoc_extension/utils/debug_trace.py` — `final_variables` name fallback.
+- `rdc_harness/rules.py` — docstring align.
+- `tests/` — `test_debug_trace_export.py` (+fallback/VS/compute dispatch/timeout), `test_rules.py` (missing-data pins), `test_export.py` (contract), `test_six_gate.py`. [`test_six_gate.py` etc.]
+- `scripts/test_all.py` + `scripts/six_gate.py` — one-command quality gate.
+
+### Deferred (off this round → P1/P2): live-GPU full-trace validation (D3D w/ debug info), A/B diff, API Inspector, Statistics top-N, capture front-end, CI server, PyPI publish, skill marketplace, AGENTS.md note.
